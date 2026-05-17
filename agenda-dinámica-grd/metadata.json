@@ -1,0 +1,10 @@
+{
+  "name": "Agenda Dinámica GRD",
+  "description": "Una agenda interactiva para visualizar y organizar charlas, talleres y plenarias del evento, con filtros por sala, ponente o temática, y la posibilidad de crear una agenda personal.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
