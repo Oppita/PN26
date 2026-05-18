@@ -285,6 +285,7 @@ function MainApp() {
           events={events}
           setEvents={setEventsData}
           onClose={() => setIsAdminOpen(false)}
+          onEventClick={(event) => setActiveAdminEventModal(event)}
         />
       )}
 
