@@ -11,11 +11,12 @@ interface AdminPanelProps {
   setEvents: React.Dispatch<React.SetStateAction<AgendaEvent[]>>;
   onClose: () => void;
   onEventClick?: (event: AgendaEvent) => void;
+  syncData: () => Promise<void>;
 }
 
-export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEventClick }: AdminPanelProps) {
+export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEventClick, syncData }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<'rooms' | 'events'>('rooms');
-  
+
   // Room form state
   const [editingRoom, setEditingRoom] = useState<Partial<Room> | null>(null);
   
@@ -31,6 +32,7 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
       try {
         const supabase = getSupabase();
         await supabase.from('talks').delete().match({ id });
+        await syncData();
       } catch(err) {
         setEvents(prevEvents);
         console.error(err);
@@ -45,6 +47,7 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
       try {
         const supabase = getSupabase();
         await supabase.from('rooms').delete().match({ id });
+        await syncData();
       } catch(err) {
         setRooms(prevRooms);
         console.error(err);
@@ -71,13 +74,16 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
     try {
       const supabase = getSupabase();
       if (exists && editingRoom.id !== 'new') {
-        await supabase.from('rooms').update(roomPayload).match({ id });
+        const { error } = await supabase.from('rooms').update(roomPayload).match({ id });
+        if (error) console.error('Supabase update room error:', error);
       } else {
-        await supabase.from('rooms').insert([roomPayload]);
+        const { error } = await supabase.from('rooms').insert([roomPayload]);
+        if (error) console.error('Supabase insert room error:', error);
       }
+      await syncData();
     } catch(err) {
       setRooms(prevRooms);
-      console.error(err);
+      console.error('saveRoom Exception:', err);
     }
   };
 
@@ -106,20 +112,19 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
         theme_tag: newEvent.themeTag,
         speakers: newEvent.speakers,
         registered_count: newEvent.registeredCount || 0,
-        capacity: newEvent.capacity || 100,
-        organizers: newEvent.organizers || [],
-        moderators: newEvent.moderators || [],
-        summary: newEvent.summary || '',
-        objective: newEvent.objective || ''
+        capacity: newEvent.capacity || 100
       };
       
       if (isEditing) {
-        await supabase.from('talks').update(payload).match({ id });
+        const { error } = await supabase.from('talks').update(payload).match({ id });
+        if (error) console.error('Supabase update talk error:', error, payload);
       } else {
-        await supabase.from('talks').insert([payload]);
+        const { error } = await supabase.from('talks').insert([payload]);
+        if (error) console.error('Supabase insert talk error:', error, payload);
       }
+      await syncData();
     } catch(err) {
-      console.error(err);
+      console.error('saveEvent Exception:', err);
     }
   };
 
