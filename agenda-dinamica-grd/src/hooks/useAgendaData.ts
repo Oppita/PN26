@@ -22,22 +22,23 @@ export function useAgendaData() {
     localStorage.setItem('agenda-bookmarks-v3', JSON.stringify(Array.from(bookmarks)));
   }, [bookmarks]);
 
-  // Fetch initial data from Supabase if we have a user
+  // Fetch initial data from Supabase
   useEffect(() => {
-    if (!user) return;
     const fetchUserData = async () => {
       try {
         const supabase = getSupabase();
         
-        // Fetch registrations
-        const { data: regData, error: regError } = await supabase
-          .from('registration')
-          .select('talk_id')
-          .eq('user_id', user.id);
-          
-        if (!regError && regData) {
-          const apiRegistrations = new Set<string>(regData.map(r => r.talk_id));
-          setRegistrations(apiRegistrations);
+        // Fetch registrations if user exists
+        if (user) {
+          const { data: regData, error: regError } = await supabase
+            .from('registration')
+            .select('talk_id')
+            .eq('user_id', user.id);
+            
+          if (!regError && regData) {
+            const apiRegistrations = new Set<string>(regData.map(r => r.talk_id));
+            setRegistrations(apiRegistrations);
+          }
         }
 
         // Fetch talks if existing in DB
@@ -58,7 +59,11 @@ export function useAgendaData() {
              themeTag: t.theme_tag || t.themeTag,
              speakers: t.speakers ? (typeof t.speakers === 'string' ? JSON.parse(t.speakers) : t.speakers) : [],
              registeredCount: t.registered_count || t.registeredCount || 0,
-             capacity: t.capacity || 100
+             capacity: t.capacity || 100,
+             organizers: t.organizers || [],
+             moderators: t.moderators || [],
+             summary: t.summary || '',
+             objective: t.objective || ''
           })) as AgendaEvent[];
           setEventsData(mappedTalks);
         } else if (!talksError && (!talksData || talksData.length === 0)) {
