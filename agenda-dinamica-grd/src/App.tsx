@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calendar, Bookmark, Settings, QrCode, Users, LogOut } from 'lucide-react';
+import { Calendar, Bookmark, Settings, QrCode, Users, LogOut, Cloud, CloudOff, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { useAgendaData } from './hooks/useAgendaData';
 import { FilterBar } from './components/FilterBar';
 import { AgendaCard } from './components/AgendaCard';
@@ -51,6 +51,9 @@ function MainApp() {
     selectedDay,
     setSelectedDay,
     availableDays,
+    syncData,
+    syncStatus,
+    lastSynced,
   } = useAgendaData();
 
   const [activeRoomModal, setActiveRoomModal] = useState<Room | null>(null);
@@ -84,9 +87,29 @@ function MainApp() {
       <header className="h-16 bg-slate-900 text-white flex items-center justify-between px-6 shrink-0 z-40">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center font-black text-xl italic uppercase">P</div>
-          <div>
-            <h1 className="text-xl font-black tracking-tight leading-none uppercase">PN26</h1>
-            <p className="text-[10px] text-slate-400 font-bold tracking-widest mt-1 uppercase">Plataforma de Navegación</p>
+          <div className="flex items-center gap-4">
+            <div>
+              <h1 className="text-xl font-black tracking-tight leading-none uppercase">PN26</h1>
+              <p className="text-[10px] text-slate-400 font-bold tracking-widest mt-1 uppercase">Plataforma de Navegación</p>
+            </div>
+            
+            {/* Sync Indicator */}
+            {isAdmin && (
+              <button 
+                onClick={syncData}
+                title={`Forzar Sincronización. Última act: ${lastSynced ? lastSynced.toLocaleTimeString() : 'N/A'}`}
+                className="ml-4 flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded border border-slate-700 transition"
+              >
+                {syncStatus === 'syncing' && <RefreshCw className="w-3.5 h-3.5 text-blue-400 animate-spin" />}
+                {syncStatus === 'success' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />}
+                {syncStatus === 'error' && <CloudOff className="w-3.5 h-3.5 text-red-400" />}
+                {syncStatus === 'idle' && <Cloud className="w-3.5 h-3.5 text-slate-400" />}
+                
+                <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">
+                  {syncStatus === 'syncing' ? 'Sincronizando...' : syncStatus === 'success' ? 'Al día' : syncStatus === 'error' ? 'Error Sync' : 'Sync'}
+                </span>
+              </button>
+            )}
           </div>
         </div>
         <div className="flex gap-3 items-center">
@@ -286,6 +309,7 @@ function MainApp() {
           setEvents={setEventsData}
           onClose={() => setIsAdminOpen(false)}
           onEventClick={(event) => setActiveAdminEventModal(event)}
+          syncData={syncData}
         />
       )}
 
