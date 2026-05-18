@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Room, AgendaEvent, EventType, Speaker } from '../data/agenda';
-import { X, Plus, Save, Trash2, Edit, Download, Upload } from 'lucide-react';
+import { X, Plus, Save, Trash2, Edit, Download, Upload, Users } from 'lucide-react';
 import { getSupabase } from '../lib/supabaseClient';
 import Papa from 'papaparse';
 import { toast } from 'sonner';
@@ -29,69 +29,67 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
   const [editingEvent, setEditingEvent] = useState<Partial<AgendaEvent> | null>(null);
 
   // Custom confirmation state
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
   const deleteEvent = async (id: string) => {
-    if (confirmDeleteId !== id) {
-      setConfirmDeleteId(id);
-      setTimeout(() => setConfirmDeleteId(null), 3000); // Reset after 3s
-      return;
-    }
-    
-    setConfirmDeleteId(null);
-    
-    // Save current state for rollback
-    const prevEvents = [...events];
-    
-    // Optimistic Update
-    setEvents(prev => prev.filter(e => e.id !== id));
-    
-    try {
-      const supabase = getSupabase();
-      const { error } = await supabase.from('talks').delete().eq('id', id);
+    if (isDeleting === id) {
+      // Second click: Perform actual delete
+      setIsDeleting(null);
+      const prevEvents = [...events];
+      setEvents(prev => prev.filter(e => e.id !== id));
       
-      if (error) throw error;
-      
-      toast.success("Charla eliminada con éxito");
-      await syncData();
-    } catch (err: any) {
-      console.error("Delete Event Error:", err);
-      setEvents(prevEvents);
-      toast.error(`Error: ${err.message || 'No se pudo eliminar'}`);
+      try {
+        const supabase = getSupabase();
+        const { error } = await supabase.from('talks').delete().eq('id', id);
+        if (error) throw error;
+        
+        toast.success("Evento eliminado de la base de datos");
+        await syncData(); // Refresh all data
+      } catch (err: any) {
+        console.error("Delete Event Error:", err);
+        setEvents(prevEvents);
+        toast.error(`Error al eliminar: ${err.message || 'Error de conexión'}`);
+      }
+    } else {
+      // First click: Enter confirm state
+      setIsDeleting(id);
+      setTimeout(() => {
+        setIsDeleting(current => current === id ? null : current);
+      }, 4000); // 4 seconds to confirm
     }
   };
 
   const deleteRoom = async (id: string) => {
-    if (confirmDeleteId !== id) {
-      setConfirmDeleteId(id);
-      setTimeout(() => setConfirmDeleteId(null), 3000);
-      return;
-    }
-
-    setConfirmDeleteId(null);
-    
-    // Check if room has associated events
-    const hasEvents = events.some(e => e.roomId === id);
-    if (hasEvents) {
-      toast.error("No se puede borrar una sala que tiene charlas asignadas.");
-      return;
-    }
-
-    const prevRooms = [...rooms];
-    setRooms(prev => prev.filter(r => r.id !== id));
-    
-    try {
-      const supabase = getSupabase();
-      const { error } = await supabase.from('rooms').delete().eq('id', id);
+    if (isDeleting === id) {
+      setIsDeleting(null);
       
-      if (error) throw error;
+      // Safety check: Don't delete rooms with events
+      const usageCount = events.filter(e => e.roomId === id).length;
+      if (usageCount > 0) {
+        toast.error(`No se puede eliminar: Esta sala tiene ${usageCount} eventos asignados.`);
+        return;
+      }
+
+      const prevRooms = [...rooms];
+      setRooms(prev => prev.filter(r => r.id !== id));
       
-      toast.success("Subevento eliminado");
-      await syncData();
-    } catch (err: any) {
-      console.error("Delete Room Error:", err);
-      setRooms(prevRooms);
-      toast.error(`Error: ${err.message || 'No se pudo eliminar'}`);
+      try {
+        const supabase = getSupabase();
+        const { error } = await supabase.from('rooms').delete().eq('id', id);
+        if (error) throw error;
+        
+        toast.success("Sala eliminada");
+        await syncData();
+      } catch (err: any) {
+        console.error("Delete Room Error:", err);
+        setRooms(prevRooms);
+        toast.error(`Error: ${err.message}`);
+      }
+    } else {
+      setIsDeleting(id);
+      setTimeout(() => {
+        setIsDeleting(current => current === id ? null : current);
+      }, 4000);
     }
   };
 
@@ -340,12 +338,17 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
                           </div>
                         </div>
                         <div className="flex gap-2">
-                          <button onClick={() => setEditingRoom(room)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit className="w-4 h-4"/></button>
+                          <button onClick={() => setEditingRoom(room)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Editar"><Edit className="w-4 h-4"/></button>
                           <button 
-                            onClick={() => deleteRoom(room.id)} 
-                            className={`p-1.5 rounded transition-all flex items-center gap-1 ${confirmDeleteId === room.id ? 'bg-red-600 text-white px-2' : 'text-red-600 hover:bg-red-50'}`}
+                            onClick={(e) => { e.stopPropagation(); deleteRoom(room.id); }} 
+                            className={`p-1.5 rounded transition-all flex items-center gap-1.5 min-w-[32px] justify-center ${isDeleting === room.id ? 'bg-red-600 text-white px-3' : 'text-red-500 hover:bg-red-50'}`}
+                            title={isDeleting === room.id ? "Confirmar eliminación" : "Eliminar sala"}
                           >
-                            {confirmDeleteId === room.id ? <span className="text-[10px] font-bold uppercase">Borrar?</span> : <Trash2 className="w-4 h-4"/>}
+                            {isDeleting === room.id ? (
+                              <span className="text-[10px] font-black uppercase tracking-tighter">¿Borrar?</span>
+                            ) : (
+                              <Trash2 className="w-4 h-4"/>
+                            )}
                           </button>
                         </div>
                       </div>
@@ -444,12 +447,17 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
                           </p>
                         </div>
                         <div className="flex gap-2 shrink-0">
-                          <button onClick={() => setEditingEvent(event)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit className="w-4 h-4"/></button>
+                          <button onClick={() => setEditingEvent(event)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Editar"><Edit className="w-4 h-4"/></button>
                           <button 
-                            onClick={() => deleteEvent(event.id)} 
-                            className={`p-1.5 rounded transition-all flex items-center gap-1 ${confirmDeleteId === event.id ? 'bg-red-600 text-white px-2' : 'text-red-600 hover:bg-red-50'}`}
+                            onClick={(e) => { e.stopPropagation(); deleteEvent(event.id); }} 
+                            className={`p-1.5 rounded transition-all flex items-center gap-1.5 min-w-[32px] justify-center ${isDeleting === event.id ? 'bg-red-600 text-white px-3' : 'text-red-500 hover:bg-red-50'}`}
+                            title={isDeleting === event.id ? "Confirmar eliminación" : "Eliminar evento"}
                           >
-                            {confirmDeleteId === event.id ? <span className="text-[10px] font-bold uppercase">Borrar?</span> : <Trash2 className="w-4 h-4"/>}
+                            {isDeleting === event.id ? (
+                              <span className="text-[10px] font-black uppercase tracking-tighter">¿Borrar?</span>
+                            ) : (
+                              <Trash2 className="w-4 h-4"/>
+                            )}
                           </button>
                         </div>
                       </div>
@@ -610,12 +618,12 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
                               {new Date(log.timestamp).toLocaleString()}
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap">
-                              <span className={`px-2 py-1 rounded text-[10px] font-black tracking-wider uppercase ${log.type === 'ROOM_ACCESS' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>
-                                {log.type === 'ROOM_ACCESS' ? 'Sala' : 'Comida'}
+                              <span className={`px-2 py-1 rounded text-[10px] font-black tracking-wider uppercase ${log.type === 'ROOM' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>
+                                {log.type === 'ROOM' ? 'Sala' : 'Comida'}
                               </span>
                             </td>
                             <td className="px-4 py-3 font-medium text-slate-800">
-                              {log.type === 'ROOM_ACCESS' 
+                              {log.type === 'ROOM' 
                                 ? rooms.find(r => r.id === log.roomId)?.name || log.roomId 
                                 : log.mealType}
                             </td>
