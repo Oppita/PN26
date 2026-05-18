@@ -22,12 +22,7 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
   // Event form state
   const [editingEvent, setEditingEvent] = useState<Partial<AgendaEvent> | null>(null);
 
-  const deleteRoom = (id: string) => {
-    if (confirm('¿Eliminar subevento? Esto no eliminará las charlas asociadas pero quedarán sin sala asignada.')) {
-      setRooms(rooms.filter(r => r.id !== id));
-      // Missing room sync to supabase, but we are not doing a rooms table right now.
-    }
-  };
+
 
   const deleteEvent = async (id: string) => {
     if (confirm('¿Eliminar esta charla permanentemente?')) {
@@ -43,19 +38,47 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
     }
   };
 
-  const saveRoom = () => {
+  const deleteRoom = async (id: string) => {
+    if (confirm('¿Eliminar esta sala permanentemente?')) {
+      const prevRooms = [...rooms];
+      setRooms(rooms.filter(r => r.id !== id));
+      try {
+        const supabase = getSupabase();
+        await supabase.from('rooms').delete().match({ id });
+      } catch(err) {
+        setRooms(prevRooms);
+        console.error(err);
+      }
+    }
+  };
+
+  const saveRoom = async () => {
     if (!editingRoom?.name || !editingRoom?.id) return;
     
     // Check if new or edit
     const exists = rooms.some(r => r.id === editingRoom.id);
+    const id = editingRoom.id === 'new' ? editingRoom.name.toLowerCase().replace(/\s+/g, '-') : editingRoom.id;
+    const roomPayload = { ...editingRoom, id } as Room;
+
+    const prevRooms = [...rooms];
     if (exists && editingRoom.id !== 'new') {
-      setRooms(rooms.map(r => r.id === editingRoom.id ? editingRoom as Room : r));
+      setRooms(rooms.map(r => r.id === editingRoom.id ? roomPayload : r));
     } else {
-      // Add new
-      const id = editingRoom.id === 'new' ? editingRoom.name.toLowerCase().replace(/\s+/g, '-') : editingRoom.id;
-      setRooms([...rooms, { ...editingRoom, id } as Room]);
+      setRooms([...rooms, roomPayload]);
     }
     setEditingRoom(null);
+
+    try {
+      const supabase = getSupabase();
+      if (exists && editingRoom.id !== 'new') {
+        await supabase.from('rooms').update(roomPayload).match({ id });
+      } else {
+        await supabase.from('rooms').insert([roomPayload]);
+      }
+    } catch(err) {
+      setRooms(prevRooms);
+      console.error(err);
+    }
   };
 
   const saveEvent = async () => {
@@ -83,7 +106,11 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
         theme_tag: newEvent.themeTag,
         speakers: newEvent.speakers,
         registered_count: newEvent.registeredCount || 0,
-        capacity: newEvent.capacity || 100
+        capacity: newEvent.capacity || 100,
+        organizers: newEvent.organizers || [],
+        moderators: newEvent.moderators || [],
+        summary: newEvent.summary || '',
+        objective: newEvent.objective || ''
       };
       
       if (isEditing) {
