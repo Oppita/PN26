@@ -55,6 +55,9 @@ function MainApp() {
     syncData,
     syncStatus,
     lastSynced,
+    supabaseLog,
+    clearLocalCache,
+    deleteEvent,
   } = useAgendaData();
 
   const [activeRoomModal, setActiveRoomModal] = useState<Room | null>(null);
@@ -108,7 +111,13 @@ function MainApp() {
                 {syncStatus === 'idle' && <Cloud className="w-3.5 h-3.5 text-slate-400" />}
                 
                 <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wider hidden md:inline-block">
-                  {syncStatus === 'syncing' ? 'Sincronizando...' : syncStatus === 'success' ? 'Al día' : syncStatus === 'error' ? 'Error Sync' : 'Sync'}
+                  {syncStatus === 'syncing' 
+                    ? 'Sincronizando...' 
+                    : syncStatus === 'success' 
+                      ? `${supabaseLog?.events || 0} charlas • ${supabaseLog?.rooms || 0} salas` 
+                      : syncStatus === 'error' 
+                        ? 'Error Sync' 
+                        : 'Sync'}
                 </span>
               </button>
             )}
@@ -304,15 +313,18 @@ function MainApp() {
       )}
 
       {isAdminOpen && (
-        <AdminPanel 
-          rooms={rooms}
-          setRooms={setRooms}
-          events={events}
-          setEvents={setEventsData}
-          onClose={() => setIsAdminOpen(false)}
-          onEventClick={(event) => setActiveAdminEventModal(event)}
-          syncData={syncData}
-        />
+          <AdminPanel 
+            rooms={rooms}
+            setRooms={setRooms}
+            events={events}
+            setEvents={setEventsData}
+            onClose={() => setIsAdminOpen(false)}
+            onEventClick={(event) => setActiveAdminEventModal(event)}
+            syncData={syncData}
+            deleteEvent={deleteEvent}
+            supabaseLog={supabaseLog}
+            clearLocalCache={clearLocalCache}
+          />
       )}
 
       {isQRHubOpen && (
