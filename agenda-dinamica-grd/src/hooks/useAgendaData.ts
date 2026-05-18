@@ -73,15 +73,19 @@ export function useAgendaData() {
       if (!roomsError && Array.isArray(fetchRooms)) {
         if (fetchRooms.length > 0) {
           setRooms(fetchRooms as Room[]);
+          localStorage.setItem('agenda-rooms-v4-seeded', 'true');
         } else {
-          // Supabase is empty. Check if we have local data to push.
-          if (rooms.length > 0) {
-            console.log('Supabase rooms empty, pushing local state...');
-            await supabase.from('rooms').upsert(rooms);
+          // Supabase is empty. Only seed if we haven't done it before for this version
+          const isSeeded = localStorage.getItem('agenda-rooms-v4-seeded') === 'true';
+          if (!isSeeded) {
+            console.log('Performing initial rooms seeding...');
+            const seedRooms = rooms.length > 0 ? rooms : INITIAL_ROOMS;
+            await supabase.from('rooms').upsert(seedRooms);
+            setRooms(seedRooms);
+            localStorage.setItem('agenda-rooms-v4-seeded', 'true');
           } else {
-            // Both are empty, fallback to INITIAL
-            setRooms(INITIAL_ROOMS);
-            await supabase.from('rooms').upsert(INITIAL_ROOMS);
+            // Legitimately empty
+            setRooms([]);
           }
         }
       }
@@ -93,7 +97,6 @@ export function useAgendaData() {
         
       if (!talksError && Array.isArray(fetchTalks)) {
         if (fetchTalks.length > 0) {
-          // Map snake_case to camelCase
           const mappedTalks = fetchTalks.map((t: any) => ({
             id: t.id,
             title: t.title,
@@ -112,11 +115,13 @@ export function useAgendaData() {
             objective: t.objective || ''
           })) as AgendaEvent[];
           setEventsData(mappedTalks);
+          localStorage.setItem('agenda-events-v4-seeded', 'true');
         } else {
-          // Supabase is empty. check local
-          if (eventsData.length > 0) {
-            console.log('Supabase talks empty, pushing local state...');
-            const payload = eventsData.map(e => ({
+          const isSeeded = localStorage.getItem('agenda-events-v4-seeded') === 'true';
+          if (!isSeeded) {
+            console.log('Performing initial events seeding...');
+            const seedEvents = eventsData.length > 0 ? eventsData : INITIAL_EVENTS;
+            const payload = seedEvents.map(e => ({
                 id: e.id,
                 title: e.title,
                 description: e.description,
@@ -134,28 +139,10 @@ export function useAgendaData() {
                 objective: e.objective || ''
             }));
             await supabase.from('talks').upsert(payload);
+            setEventsData(seedEvents);
+            localStorage.setItem('agenda-events-v4-seeded', 'true');
           } else {
-             // Fully empty fallback
-             setEventsData(INITIAL_EVENTS);
-             // push to supabase
-             const payload = INITIAL_EVENTS.map(e => ({
-                id: e.id,
-                title: e.title,
-                description: e.description,
-                start_time: e.startTime,
-                end_time: e.endTime,
-                room_id: e.roomId,
-                type: e.type,
-                theme_tag: e.themeTag,
-                speakers: e.speakers,
-                registered_count: e.registeredCount || 0,
-                capacity: e.capacity || 100,
-                organizers: e.organizers || [],
-                moderators: e.moderators || [],
-                summary: e.summary || '',
-                objective: e.objective || ''
-            }));
-            await supabase.from('talks').upsert(payload);
+            setEventsData([]);
           }
         }
       }
