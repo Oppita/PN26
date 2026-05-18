@@ -13,7 +13,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({
   user: null,
   session: null,
-  isAdmin: false,
+  isAdmin: true,
   signOut: async () => {},
   signIn: async () => {},
   signUp: async () => {},
@@ -21,43 +21,63 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+
   const [user] = useState<any>(() => {
+
     try {
+
       let id = localStorage.getItem('anon-user-id');
+
       if (!id) {
+
         id = crypto.randomUUID();
+
         localStorage.setItem('anon-user-id', id);
       }
-      return { id, email: '7albahacas@gmail.com' };
-    } catch(e) {
-      return { id: 'fallback-id', email: '7albahacas@gmail.com' };
+
+      return {
+        id,
+        email: '7albahacas@gmail.com'
+      };
+
+    } catch (e) {
+
+      return {
+        id: 'fallback-id',
+        email: '7albahacas@gmail.com'
+      };
     }
   });
 
-  const [isAdmin] = useState(() => {
-    return localStorage.getItem('pn26-admin') === 'true' || window.location.search.includes('admin=true');
-  });
+  // =========================
+  // FORZAR ADMIN
+  // =========================
+  const [isAdmin] = useState(true);
 
   useEffect(() => {
-    if (window.location.search.includes('admin=true')) {
-      localStorage.setItem('pn26-admin', 'true');
-    }
+
+    localStorage.setItem('pn26-admin', 'true');
+
+    console.log('✅ ADMIN MODE ACTIVADO');
+
   }, []);
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      session: null, 
-      isAdmin, 
-      signOut: async () => {
-        localStorage.removeItem('pn26-admin');
-        window.location.href = '/';
-      }, 
-      signIn: async () => {}, 
-      signUp: async () => {}, 
-      loading: false 
-    }}>
+
+    <AuthContext.Provider
+      value={{
+        user,
+        session: null,
+        isAdmin,
+        signOut: async () => {},
+        signIn: async () => {},
+        signUp: async () => {},
+        loading: false
+      }}
+    >
+
       {children}
+
     </AuthContext.Provider>
   );
 };
