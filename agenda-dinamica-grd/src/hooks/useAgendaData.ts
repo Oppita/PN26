@@ -1,280 +1,306 @@
-import { useState, useEffect, useMemo } from 'react';
-import { INITIAL_EVENTS, INITIAL_ROOMS, AgendaEvent, Room, EventType } from '../data/agenda';
+import { useState, useEffect, useCallback } from 'react';
 import { getSupabase } from '../lib/supabaseClient';
-import { useAuth } from '../context/AuthContext';
+import { AgendaEvent, Room, INITIAL_EVENTS, INITIAL_ROOMS } from '../data/agenda';
 
-export function useAgendaData() {
-  const { user } = useAuth();
-  const [bookmarks, setBookmarks] = useState<Set<string>>(() => {
-    try {
-      const saved = localStorage.getItem('agenda-bookmarks-v3');
-      if (saved) return new Set(JSON.parse(saved));
-    } catch (e) {}
-    return new Set<string>();
-  });
-  
-  const [registrations, setRegistrations] = useState<Set<string>>(new Set());
-  const [rooms, setRooms] = useState<Room[]>(() => {
-    try {
-      const saved = localStorage.getItem('agenda-rooms-v3');
-      if (saved) return JSON.parse(saved);
-    } catch(e) {}
-    return INITIAL_ROOMS;
-  });
-  
-  const [eventsData, setEventsData] = useState<AgendaEvent[]>(() => {
-    try {
-      const saved = localStorage.getItem('agenda-events-v3');
-      if (saved) return JSON.parse(saved);
-    } catch(e) {}
-    return INITIAL_EVENTS;
-  });
-  
-  const [loadingInitial, setLoadingInitial] = useState(true);
-  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
-  const [lastSynced, setLastSynced] = useState<Date | null>(null);
+export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
 
-  // Sync to local storage on changes
+interface UseAgendaDataReturn {
+  events: AgendaEvent[];
+  rooms: Room[];
+  syncStatus: SyncStatus;
+  syncError: string | null;
+  lastSyncTime: Date | null;
+  syncData: () => Promise<void>;
+  clearCache: () => void;
+  createEvent: (event: Omit<AgendaEvent, 'id'>) => Promise<void>;
+  updateEvent: (event: AgendaEvent) => Promise<void>;
+  deleteEvent: (eventId: string) => Promise<void>;
+  updateRoom: (room: Room) => Promise<void>;
+  deleteRoom: (roomId: string) => Promise<void>;
+}
+
+// Cache keys
+const CACHE_KEYS = {
+  EVENTS: 'agenda_events_cache',
+  ROOMS: 'agenda_rooms_cache',
+  LAST_SYNC: 'agenda_last_sync'
+};
+
+export function useAgendaData(): UseAgendaDataReturn {
+  const [events, setEvents] = useState<AgendaEvent[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+
+  const supabase = getSupabase();
+
+  // Load from localStorage on mount
   useEffect(() => {
-    localStorage.setItem('agenda-bookmarks-v3', JSON.stringify(Array.from(bookmarks)));
-  }, [bookmarks]);
+    const cachedEvents = localStorage.getItem(CACHE_KEYS.EVENTS);
+    const cachedRooms = localStorage.getItem(CACHE_KEYS.ROOMS);
+    const cachedLastSync = localStorage.getItem(CACHE_KEYS.LAST_SYNC);
+    
+    if (cachedEvents) {
+      setEvents(JSON.parse(cachedEvents));
+    }
+    if (cachedRooms) {
+      setRooms(JSON.parse(cachedRooms));
+    }
+    if (cachedLastSync) {
+      setLastSyncTime(new Date(JSON.parse(cachedLastSync)));
+    }
+  }, []);
 
+  // Save to localStorage whenever events/rooms change
   useEffect(() => {
-    localStorage.setItem('agenda-rooms-v3', JSON.stringify(rooms));
-  }, [rooms]);
+    if (events.length > 0) {
+      localStorage.setItem(CACHE_KEYS.EVENTS, JSON.stringify(events));
+    }
+    if (rooms.length > 0) {
+      localStorage.setItem(CACHE_KEYS.ROOMS, JSON.stringify(rooms));
+    }
+    if (lastSyncTime) {
+      localStorage.setItem(CACHE_KEYS.LAST_SYNC, JSON.stringify(lastSyncTime.toISOString()));
+    }
+  }, [events, rooms, lastSyncTime]);
 
-  useEffect(() => {
-    localStorage.setItem('agenda-events-v3', JSON.stringify(eventsData));
-  }, [eventsData]);
+  const clearCache = useCallback(() => {
+    localStorage.removeItem(CACHE_KEYS.EVENTS);
+    localStorage.removeItem(CACHE_KEYS.ROOMS);
+    localStorage.removeItem(CACHE_KEYS.LAST_SYNC);
+    setEvents([]);
+    setRooms([]);
+    setLastSyncTime(null);
+    syncData(); // Force fresh sync after clearing cache
+  }, []);
 
-  const syncData = async () => {
+  const syncData = useCallback(async () => {
     setSyncStatus('syncing');
-    try {
-      const supabase = getSupabase();
-      
-      // Fetch registrations if user exists
-      if (user) {
-        const { data: regData, error: regError } = await supabase
-          .from('registration')
-          .select('talk_id')
-          .eq('user_id', user.id);
-          
-        if (!regError && regData) {
-          const apiRegistrations = new Set<string>(regData.map(r => r.talk_id));
-          setRegistrations(apiRegistrations);
-        }
-      }
-
-      // Fetch rooms
-      const { data: fetchRooms, error: roomsError } = await supabase
-        .from('rooms')
-        .select('*');
-        
-      if (!roomsError && Array.isArray(fetchRooms)) {
-        if (fetchRooms.length > 0) {
-          setRooms(fetchRooms as Room[]);
-          localStorage.setItem('agenda-rooms-v4-seeded', 'true');
-        } else {
-          // Supabase is empty. Only seed if we haven't done it before for this version
-          const isSeeded = localStorage.getItem('agenda-rooms-v4-seeded') === 'true';
-          if (!isSeeded) {
-            console.log('Performing initial rooms seeding...');
-            const seedRooms = rooms.length > 0 ? rooms : INITIAL_ROOMS;
-            await supabase.from('rooms').upsert(seedRooms);
-            setRooms(seedRooms);
-            localStorage.setItem('agenda-rooms-v4-seeded', 'true');
-          } else {
-            // Legitimately empty
-            setRooms([]);
-          }
-        }
-      }
-
-      // Fetch talks
-      const { data: fetchTalks, error: talksError } = await supabase
-        .from('talks')
-        .select('*');
-        
-      if (!talksError && Array.isArray(fetchTalks)) {
-        if (fetchTalks.length > 0) {
-          const mappedTalks = fetchTalks.map((t: any) => ({
-            id: t.id,
-            title: t.title,
-            description: t.description || '',
-            startTime: t.start_time || t.startTime,
-            endTime: t.end_time || t.endTime,
-            roomId: t.room_id || t.roomId,
-            type: t.type || 'Keynote',
-            themeTag: t.theme_tag || t.themeTag,
-            speakers: t.speakers ? (typeof t.speakers === 'string' ? JSON.parse(t.speakers) : t.speakers) : [],
-            registeredCount: t.registered_count || t.registeredCount || 0,
-            capacity: t.capacity || 100,
-            organizers: t.organizers || [],
-            moderators: t.moderators || [],
-            summary: t.summary || '',
-            objective: t.objective || ''
-          })) as AgendaEvent[];
-          setEventsData(mappedTalks);
-          localStorage.setItem('agenda-events-v4-seeded', 'true');
-        } else {
-          const isSeeded = localStorage.getItem('agenda-events-v4-seeded') === 'true';
-          if (!isSeeded) {
-            console.log('Performing initial events seeding...');
-            const seedEvents = eventsData.length > 0 ? eventsData : INITIAL_EVENTS;
-            const payload = seedEvents.map(e => ({
-                id: e.id,
-                title: e.title,
-                description: e.description,
-                start_time: e.startTime,
-                end_time: e.endTime,
-                room_id: e.roomId,
-                type: e.type,
-                theme_tag: e.themeTag,
-                speakers: e.speakers,
-                registered_count: e.registeredCount || 0,
-                capacity: e.capacity || 100,
-                organizers: e.organizers || [],
-                moderators: e.moderators || [],
-                summary: e.summary || '',
-                objective: e.objective || ''
-            }));
-            await supabase.from('talks').upsert(payload);
-            setEventsData(seedEvents);
-            localStorage.setItem('agenda-events-v4-seeded', 'true');
-          } else {
-            setEventsData([]);
-          }
-        }
-      }
-      setSyncStatus('success');
-      setLastSynced(new Date());
-    } catch (err) {
-      console.error('Failed to fetch from supabase', err);
-      setSyncStatus('error');
-    }
-  };
-
-  // Fetch initial data from Supabase
-  useEffect(() => {
-    const init = async () => {
-      await syncData();
-      setLoadingInitial(false);
-    };
-    init();
-  }, [user]);
-
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedType, setSelectedType] = useState<EventType | 'All'>('All');
-  const [selectedRoom, setSelectedRoom] = useState<string>('All');
-  const [selectedDay, setSelectedDay] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'All' | 'MyAgenda'>('All');
-
-  useEffect(() => {
-    if (!selectedDay && eventsData.length > 0) {
-      const days = Array.from(new Set(eventsData.map(e => e.startTime.split('T')[0]))).sort();
-      if (days.length > 0) setSelectedDay(days[0]);
-    }
-  }, [eventsData, selectedDay]);
-
-  const toggleBookmark = (eventId: string) => {
-    setBookmarks((prev) => {
-      const next = new Set(prev);
-      if (next.has(eventId)) next.delete(eventId);
-      else next.add(eventId);
-      return next;
-    });
-  };
-
-  const registerForEvent = async (eventId: string) => {
-    if (!user) return;
-    // Optimistic UI updates
-    setEventsData(prev => prev.map(e => e.id === eventId ? { ...e, registeredCount: (e.registeredCount || 0) + 1 } : e));
-    setRegistrations(prev => new Set(prev).add(eventId));
+    setSyncError(null);
     
     try {
-      const supabase = getSupabase();
-      await supabase.from('registration').insert({ user_id: user.id, talk_id: eventId });
-    } catch (e) {
-      console.error('Failed to register', e);
-      // Revert optimistic
-      setRegistrations(prev => { const n = new Set(prev); n.delete(eventId); return n; });
-    }
-  };
- 
-  const cancelRegistration = async (eventId: string) => {
-    if (!user) return;
-    setEventsData(prev => prev.map(e => e.id === eventId ? { ...e, registeredCount: Math.max(0, (e.registeredCount || 0) - 1) } : e));
-    setRegistrations(prev => { const n = new Set(prev); n.delete(eventId); return n; });
+      console.log('🔄 Syncing data from Supabase...');
+      
+      // Fetch events from Supabase
+      const { data: eventsData, error: eventsError } = await supabase
+        .from('agenda_talks')
+        .select('*')
+        .order('startTime', { ascending: true });
 
-    try {
-      const supabase = getSupabase();
-      await supabase.from('registration').delete().match({ user_id: user.id, talk_id: eventId });
-    } catch (e) {
-      console.error('Failed to cancel', e);
-    }
-  };
-
-  const availableDays = useMemo(() => {
-    return Array.from(new Set(eventsData.map(e => e.startTime.split('T')[0]))).sort();
-  }, [eventsData]);
-
-  const filteredEvents = useMemo(() => {
-    return eventsData.filter((event) => {
-      if (selectedDay && event.startTime.split('T')[0] !== selectedDay && viewMode !== 'MyAgenda') return false;
-      if (viewMode === 'MyAgenda' && !bookmarks.has(event.id) && !registrations.has(event.id)) return false;
-      if (selectedRoom !== 'All' && event.roomId !== selectedRoom) return false;
-      if (selectedType !== 'All' && event.type !== selectedType) return false;
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase();
-        const matchesTitle = event.title.toLowerCase().includes(query);
-        const matchesSpeakers = event.speakers.some((s) => s.name.toLowerCase().includes(query));
-        if (!matchesTitle && !matchesSpeakers) return false;
+      if (eventsError) {
+        if (eventsError.code === '42P01') {
+          console.warn('Table agenda_talks does not exist yet');
+          setEvents([]);
+          localStorage.setItem(CACHE_KEYS.EVENTS, JSON.stringify([]));
+        } else {
+          throw new Error(`Events error: ${eventsError.message}`);
+        }
+      } else {
+        console.log(`📊 Fetched ${eventsData?.length || 0} events from Supabase`);
+        setEvents(eventsData as AgendaEvent[] || []);
+        localStorage.setItem(CACHE_KEYS.EVENTS, JSON.stringify(eventsData || []));
       }
-      return true;
-    }).sort((a, b) => {
-      const timeDiff = new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
-      if (timeDiff !== 0) return timeDiff;
-      return a.title.localeCompare(b.title);
-    });
-  }, [searchQuery, selectedType, selectedRoom, selectedDay, viewMode, bookmarks, registrations, eventsData]);
+      
+      // Fetch rooms from Supabase
+      const { data: roomsData, error: roomsError } = await supabase
+        .from('rooms')
+        .select('*');
 
-  const groupedEvents = useMemo(() => {
-    const groups: Record<string, Record<string, AgendaEvent[]>> = {};
-    filteredEvents.forEach(event => {
-      const dateKey = event.startTime.split('T')[0];
-      const timeKey = event.startTime;
-      if (!groups[dateKey]) groups[dateKey] = {};
-      if (!groups[dateKey]?.[timeKey]) groups[dateKey][timeKey] = [];
-      groups[dateKey][timeKey].push(event);
-    });
-    return groups;
-  }, [filteredEvents]);
+      if (roomsError && roomsError.code !== '42P01') {
+        throw new Error(`Rooms error: ${roomsError.message}`);
+      }
+      
+      if (roomsData && roomsData.length > 0) {
+        setRooms(roomsData as Room[]);
+        localStorage.setItem(CACHE_KEYS.ROOMS, JSON.stringify(roomsData));
+      } else if (roomsError?.code === '42P01') {
+        setRooms(INITIAL_ROOMS);
+        localStorage.setItem(CACHE_KEYS.ROOMS, JSON.stringify(INITIAL_ROOMS));
+      } else {
+        setRooms(INITIAL_ROOMS);
+        localStorage.setItem(CACHE_KEYS.ROOMS, JSON.stringify(INITIAL_ROOMS));
+      }
+
+      const now = new Date();
+      setLastSyncTime(now);
+      localStorage.setItem(CACHE_KEYS.LAST_SYNC, JSON.stringify(now.toISOString()));
+      
+      setSyncStatus('success');
+      console.log('✅ Sync completed successfully');
+      
+      setTimeout(() => {
+        setSyncStatus(prev => prev === 'success' ? 'idle' : prev);
+      }, 2000);
+      
+    } catch (err) {
+      console.error('❌ Sync error:', err);
+      setSyncError(err instanceof Error ? err.message : 'Error de sincronización');
+      setSyncStatus('error');
+      
+      setTimeout(() => {
+        setSyncError(null);
+        setSyncStatus(prev => prev === 'error' ? 'idle' : prev);
+      }, 4000);
+    }
+  }, [supabase]);
+
+  // Delete event - CRUCIAL: with localStorage update and 500ms delay
+  const deleteEvent = useCallback(async (eventId: string) => {
+    console.log(`🗑️ Deleting event: ${eventId}`);
+    
+    // 1. Immediate optimistic update in memory
+    const currentEvents = events;
+    const updatedEvents = currentEvents.filter(e => e.id !== eventId);
+    setEvents(updatedEvents);
+    
+    // 2. IMMEDIATE localStorage update (CRITICAL FIX)
+    localStorage.setItem(CACHE_KEYS.EVENTS, JSON.stringify(updatedEvents));
+    console.log(`💾 Updated localStorage immediately, new count: ${updatedEvents.length}`);
+    
+    try {
+      // 3. First, delete from registration table (clean dependencies)
+      const { error: regError } = await supabase
+        .from('registration')
+        .delete()
+        .eq('talk_id', eventId);
+      
+      if (regError) {
+        console.warn('Warning when deleting registrations:', regError);
+      }
+      
+      // 4. Then delete the talk
+      const { error } = await supabase
+        .from('agenda_talks')
+        .delete()
+        .eq('id', eventId);
+      
+      if (error) throw error;
+      
+      console.log(`✅ Event ${eventId} deleted from Supabase`);
+      
+      // 5. Wait 500ms to ensure cloud consistency (CRITICAL DELAY)
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // 6. Force re-sync to confirm with cloud
+      console.log('🔄 Re-syncing to confirm deletion...');
+      await syncData();
+      
+    } catch (err) {
+      console.error('❌ Error deleting event:', err);
+      setSyncError('Error al eliminar la charla');
+      setSyncStatus('error');
+      
+      // Revert optimistic update on error
+      setEvents(currentEvents);
+      localStorage.setItem(CACHE_KEYS.EVENTS, JSON.stringify(currentEvents));
+      await syncData();
+      throw err;
+    }
+  }, [supabase, syncData, events]);
+
+  const createEvent = useCallback(async (eventData: Omit<AgendaEvent, 'id'>) => {
+    const newEvent = {
+      ...eventData,
+      id: crypto.randomUUID(),
+    };
+    
+    try {
+      const { error } = await supabase
+        .from('agenda_talks')
+        .insert([newEvent]);
+      
+      if (error) throw error;
+      
+      await syncData();
+    } catch (err) {
+      console.error('Error creating event:', err);
+      setSyncError('Error al crear la charla');
+      setSyncStatus('error');
+      throw err;
+    }
+  }, [supabase, syncData]);
+
+  const updateEvent = useCallback(async (updatedEvent: AgendaEvent) => {
+    setEvents(prev => prev.map(e => e.id === updatedEvent.id ? updatedEvent : e));
+    localStorage.setItem(CACHE_KEYS.EVENTS, JSON.stringify(
+      events.map(e => e.id === updatedEvent.id ? updatedEvent : e)
+    ));
+    
+    try {
+      const { error } = await supabase
+        .from('agenda_talks')
+        .upsert(updatedEvent);
+      
+      if (error) throw error;
+      
+      await syncData();
+    } catch (err) {
+      console.error('Error updating event:', err);
+      setSyncError('Error al guardar la charla');
+      setSyncStatus('error');
+      await syncData();
+      throw err;
+    }
+  }, [supabase, syncData, events]);
+
+  const updateRoom = useCallback(async (updatedRoom: Room) => {
+    setRooms(prev => prev.map(r => r.id === updatedRoom.id ? updatedRoom : r));
+    localStorage.setItem(CACHE_KEYS.ROOMS, JSON.stringify(
+      rooms.map(r => r.id === updatedRoom.id ? updatedRoom : r)
+    ));
+    
+    try {
+      const { error } = await supabase
+        .from('rooms')
+        .upsert(updatedRoom);
+      
+      if (error) throw error;
+      await syncData();
+    } catch (err) {
+      console.error('Error updating room:', err);
+      setSyncError('Error al guardar la sala');
+      setSyncStatus('error');
+      await syncData();
+    }
+  }, [supabase, syncData, rooms]);
+
+  const deleteRoom = useCallback(async (roomId: string) => {
+    setRooms(prev => prev.filter(r => r.id !== roomId));
+    localStorage.setItem(CACHE_KEYS.ROOMS, JSON.stringify(rooms.filter(r => r.id !== roomId)));
+    
+    try {
+      const { error } = await supabase
+        .from('rooms')
+        .delete()
+        .eq('id', roomId);
+      
+      if (error) throw error;
+      await syncData();
+    } catch (err) {
+      console.error('Error deleting room:', err);
+      setSyncError('Error al eliminar la sala');
+      setSyncStatus('error');
+      await syncData();
+    }
+  }, [supabase, syncData, rooms]);
+
+  useEffect(() => {
+    syncData();
+  }, []);
 
   return {
-    events: eventsData,
-    filteredEvents,
-    groupedEvents,
+    events,
     rooms,
-    setRooms,
-    setEventsData,
-    bookmarks,
-    toggleBookmark,
-    registrations,
-    registerForEvent,
-    cancelRegistration,
-    searchQuery,
-    setSearchQuery,
-    selectedType,
-    setSelectedType,
-    selectedRoom,
-    setSelectedRoom,
-    selectedDay,
-    setSelectedDay,
-    availableDays,
-    viewMode,
-    setViewMode,
-    syncData,
     syncStatus,
-    lastSynced,
+    syncError,
+    lastSyncTime,
+    syncData,
+    clearCache,
+    createEvent,
+    updateEvent,
+    deleteEvent,
+    updateRoom,
+    deleteRoom,
   };
 }
