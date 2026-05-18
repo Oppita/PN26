@@ -3,6 +3,9 @@ import { Room, AgendaEvent, EventType, Speaker } from '../data/agenda';
 import { X, Plus, Save, Trash2, Edit, Download, Upload } from 'lucide-react';
 import { getSupabase } from '../lib/supabaseClient';
 import Papa from 'papaparse';
+import { toast } from 'sonner';
+import { useQRControl } from '../hooks/useQRControl';
+import { useAttendees } from '../hooks/useAttendees';
 
 interface AdminPanelProps {
   rooms: Room[];
@@ -15,7 +18,9 @@ interface AdminPanelProps {
 }
 
 export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEventClick, syncData }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'rooms' | 'events'>('rooms');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'events' | 'logs'>('rooms');
+  const { logs } = useQRControl();
+  const { attendees } = useAttendees();
 
   // Room form state
   const [editingRoom, setEditingRoom] = useState<Partial<Room> | null>(null);
@@ -23,35 +28,70 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
   // Event form state
   const [editingEvent, setEditingEvent] = useState<Partial<AgendaEvent> | null>(null);
 
-
+  // Custom confirmation state
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const deleteEvent = async (id: string) => {
-    if (confirm('¿Eliminar esta charla permanentemente?')) {
-      const prevEvents = [...events];
-      setEvents(events.filter(e => e.id !== id));
-      try {
-        const supabase = getSupabase();
-        await supabase.from('talks').delete().match({ id });
-        await syncData();
-      } catch(err) {
-        setEvents(prevEvents);
-        console.error(err);
-      }
+    if (confirmDeleteId !== id) {
+      setConfirmDeleteId(id);
+      setTimeout(() => setConfirmDeleteId(null), 3000); // Reset after 3s
+      return;
+    }
+    
+    setConfirmDeleteId(null);
+    
+    // Save current state for rollback
+    const prevEvents = [...events];
+    
+    // Optimistic Update
+    setEvents(prev => prev.filter(e => e.id !== id));
+    
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('talks').delete().eq('id', id);
+      
+      if (error) throw error;
+      
+      toast.success("Charla eliminada con éxito");
+      await syncData();
+    } catch (err: any) {
+      console.error("Delete Event Error:", err);
+      setEvents(prevEvents);
+      toast.error(`Error: ${err.message || 'No se pudo eliminar'}`);
     }
   };
 
   const deleteRoom = async (id: string) => {
-    if (confirm('¿Eliminar esta sala permanentemente?')) {
-      const prevRooms = [...rooms];
-      setRooms(rooms.filter(r => r.id !== id));
-      try {
-        const supabase = getSupabase();
-        await supabase.from('rooms').delete().match({ id });
-        await syncData();
-      } catch(err) {
-        setRooms(prevRooms);
-        console.error(err);
-      }
+    if (confirmDeleteId !== id) {
+      setConfirmDeleteId(id);
+      setTimeout(() => setConfirmDeleteId(null), 3000);
+      return;
+    }
+
+    setConfirmDeleteId(null);
+    
+    // Check if room has associated events
+    const hasEvents = events.some(e => e.roomId === id);
+    if (hasEvents) {
+      toast.error("No se puede borrar una sala que tiene charlas asignadas.");
+      return;
+    }
+
+    const prevRooms = [...rooms];
+    setRooms(prev => prev.filter(r => r.id !== id));
+    
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('rooms').delete().eq('id', id);
+      
+      if (error) throw error;
+      
+      toast.success("Subevento eliminado");
+      await syncData();
+    } catch (err: any) {
+      console.error("Delete Room Error:", err);
+      setRooms(prevRooms);
+      toast.error(`Error: ${err.message || 'No se pudo eliminar'}`);
     }
   };
 
@@ -74,16 +114,27 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
     try {
       const supabase = getSupabase();
       if (exists && editingRoom.id !== 'new') {
-        const { error } = await supabase.from('rooms').update(roomPayload).match({ id });
-        if (error) console.error('Supabase update room error:', error);
+        const { error } = await supabase.from('rooms').update(roomPayload).eq('id', id);
+        if (error) {
+          console.error('Supabase update room error:', error);
+          toast.error("Error al actualizar la sala");
+        } else {
+          toast.success("Sala actualizada");
+        }
       } else {
         const { error } = await supabase.from('rooms').insert([roomPayload]);
-        if (error) console.error('Supabase insert room error:', error);
+        if (error) {
+          console.error('Supabase insert room error:', error);
+          toast.error("Error al crear la sala");
+        } else {
+          toast.success("Sala creada correctamente");
+        }
       }
       await syncData();
     } catch(err) {
       setRooms(prevRooms);
       console.error('saveRoom Exception:', err);
+      toast.error("Hubo un error guardando la sala");
     }
   };
 
@@ -112,19 +163,34 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
         theme_tag: newEvent.themeTag,
         speakers: newEvent.speakers,
         registered_count: newEvent.registeredCount || 0,
-        capacity: newEvent.capacity || 100
+        capacity: newEvent.capacity || 100,
+        organizers: newEvent.organizers || [],
+        moderators: newEvent.moderators || [],
+        summary: newEvent.summary || '',
+        objective: newEvent.objective || ''
       };
       
       if (isEditing) {
-        const { error } = await supabase.from('talks').update(payload).match({ id });
-        if (error) console.error('Supabase update talk error:', error, payload);
+        const { error } = await supabase.from('talks').update(payload).eq('id', id);
+        if (error) {
+          console.error('Supabase update talk error:', error, payload);
+          toast.error("Error al actualizar la charla");
+        } else {
+          toast.success("Charla actualizada exitosamente");
+        }
       } else {
         const { error } = await supabase.from('talks').insert([payload]);
-        if (error) console.error('Supabase insert talk error:', error, payload);
+        if (error) {
+          console.error('Supabase insert talk error:', error, payload);
+          toast.error("Error al crear la charla");
+        } else {
+          toast.success("Nueva charla guardada exitosamente");
+        }
       }
       await syncData();
     } catch(err) {
       console.error('saveEvent Exception:', err);
+      toast.error("Hubo un error guardando la información");
     }
   };
 
@@ -180,7 +246,7 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
 
           // Update local state
           setEvents(importedEvents);
-          alert(`Éxito al importar ${importedEvents.length} eventos. Sincronizando con Supabase...`);
+          toast.info(`Estructura procesada (${importedEvents.length} eventos). Subiendo a la base de datos...`);
           
           // Bulk Upsert in Supabase
           const supabase = getSupabase();
@@ -199,9 +265,10 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
           }));
           
           await supabase.from('talks').upsert(supabasePayload);
+          toast.success("Múltiples eventos importados exitosamente");
         } catch (error) {
           console.error("Error importing CSV:", error);
-          alert("Hubo un error importando el CSV. Asegúrate de que el formato sea el correcto.");
+          toast.error("Hubo un error en la importación. Comprueba el formato de CSV.");
         }
         
         // Reset file input
@@ -233,6 +300,12 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
           >
             Charlas (Contenido)
           </button>
+          <button 
+            className={`py-3 px-4 font-bold text-sm border-b-2 ${activeTab === 'logs' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-500'}`}
+            onClick={() => setActiveTab('logs')}
+          >
+            Logs Escáner
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
@@ -252,6 +325,11 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
                     </button>
                   </div>
                   <div className="grid grid-cols-1 gap-3">
+                    {rooms.length === 0 && (
+                      <div className="p-8 text-center text-slate-500 border border-dashed rounded-xl bg-slate-50/50">
+                        No hay subeventos o salas configuradas. Crea una para comenzar.
+                      </div>
+                    )}
                     {rooms.map(room => (
                       <div key={room.id} className="bg-white p-4 border border-slate-200 rounded-xl flex items-center justify-between shadow-sm">
                         <div className="flex items-center gap-3">
@@ -263,7 +341,12 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
                         </div>
                         <div className="flex gap-2">
                           <button onClick={() => setEditingRoom(room)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit className="w-4 h-4"/></button>
-                          <button onClick={() => deleteRoom(room.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4"/></button>
+                          <button 
+                            onClick={() => deleteRoom(room.id)} 
+                            className={`p-1.5 rounded transition-all flex items-center gap-1 ${confirmDeleteId === room.id ? 'bg-red-600 text-white px-2' : 'text-red-600 hover:bg-red-50'}`}
+                          >
+                            {confirmDeleteId === room.id ? <span className="text-[10px] font-bold uppercase">Borrar?</span> : <Trash2 className="w-4 h-4"/>}
+                          </button>
                         </div>
                       </div>
                     ))}
@@ -339,6 +422,11 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
                     </div>
                   </div>
                   <div className="grid grid-cols-1 gap-3">
+                    {events.length === 0 && (
+                      <div className="p-8 text-center text-slate-500 border border-dashed rounded-xl bg-slate-50/50">
+                        No hay charlas configuradas. Crea una o importa desde un CSV.
+                      </div>
+                    )}
                     {events.map((event, i) => (
                       <div 
                         key={i} 
@@ -357,7 +445,12 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
                         </div>
                         <div className="flex gap-2 shrink-0">
                           <button onClick={() => setEditingEvent(event)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit className="w-4 h-4"/></button>
-                          <button onClick={() => deleteEvent(event.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4"/></button>
+                          <button 
+                            onClick={() => deleteEvent(event.id)} 
+                            className={`p-1.5 rounded transition-all flex items-center gap-1 ${confirmDeleteId === event.id ? 'bg-red-600 text-white px-2' : 'text-red-600 hover:bg-red-50'}`}
+                          >
+                            {confirmDeleteId === event.id ? <span className="text-[10px] font-bold uppercase">Borrar?</span> : <Trash2 className="w-4 h-4"/>}
+                          </button>
                         </div>
                       </div>
                     ))}
@@ -482,6 +575,74 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* LOGS TAB */}
+          {activeTab === 'logs' && (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-black text-slate-800 text-lg flex items-center gap-2">
+                  <Users className="w-5 h-5 text-emerald-600" /> Historial de Escaneos
+                </h3>
+                <span className="text-xs font-bold text-slate-500 bg-slate-200 px-2.5 py-1 rounded-full">
+                  {logs.length} registros
+                </span>
+              </div>
+              
+              <div className="bg-white rounded border border-slate-200 overflow-hidden">
+                <div className="max-h-[60vh] overflow-y-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50 border-b border-slate-200 sticky top-0">
+                      <tr>
+                        <th className="px-4 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider">Fecha / Hora</th>
+                        <th className="px-4 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider">Tipo</th>
+                        <th className="px-4 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider">Detalle</th>
+                        <th className="px-4 py-3 font-bold text-slate-600 text-xs uppercase tracking-wider">Usuario (QR)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {logs.map(log => {
+                        const attendee = attendees.find(a => a.id === log.qrData);
+                        return (
+                          <tr key={log.id} className="hover:bg-slate-50">
+                            <td className="px-4 py-3 whitespace-nowrap text-slate-600">
+                              {new Date(log.timestamp).toLocaleString()}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <span className={`px-2 py-1 rounded text-[10px] font-black tracking-wider uppercase ${log.type === 'ROOM_ACCESS' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>
+                                {log.type === 'ROOM_ACCESS' ? 'Sala' : 'Comida'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 font-medium text-slate-800">
+                              {log.type === 'ROOM_ACCESS' 
+                                ? rooms.find(r => r.id === log.roomId)?.name || log.roomId 
+                                : log.mealType}
+                            </td>
+                            <td className="px-4 py-3">
+                              {attendee ? (
+                                <div className="flex flex-col">
+                                  <span className="font-bold text-slate-800">{attendee.name}</span>
+                                  <span className="text-[10px] text-slate-500 uppercase">{attendee.organization}</span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 font-mono text-xs">{log.qrData}</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {logs.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
+                            No hay registros de escaneo
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
 
