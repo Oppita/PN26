@@ -14,50 +14,89 @@ export function useAgendaData() {
   });
   
   const [registrations, setRegistrations] = useState<Set<string>>(new Set());
-  const [rooms, setRooms] = useState<Room[]>(INITIAL_ROOMS);
-  const [eventsData, setEventsData] = useState<AgendaEvent[]>(INITIAL_EVENTS);
+  const [rooms, setRooms] = useState<Room[]>(() => {
+    try {
+      const saved = localStorage.getItem('agenda-rooms-v3');
+      if (saved) return JSON.parse(saved);
+    } catch(e) {}
+    return INITIAL_ROOMS;
+  });
+  
+  const [eventsData, setEventsData] = useState<AgendaEvent[]>(() => {
+    try {
+      const saved = localStorage.getItem('agenda-events-v3');
+      if (saved) return JSON.parse(saved);
+    } catch(e) {}
+    return INITIAL_EVENTS;
+  });
+  
   const [loadingInitial, setLoadingInitial] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const [lastSynced, setLastSynced] = useState<Date | null>(null);
 
+  // Sync to local storage on changes
   useEffect(() => {
     localStorage.setItem('agenda-bookmarks-v3', JSON.stringify(Array.from(bookmarks)));
   }, [bookmarks]);
 
-  // Fetch initial data from Supabase
   useEffect(() => {
-    const fetchUserData = async () => {
-      try {
-        const supabase = getSupabase();
+    localStorage.setItem('agenda-rooms-v3', JSON.stringify(rooms));
+  }, [rooms]);
+
+  useEffect(() => {
+    if (eventsData.length > 0) {
+      localStorage.setItem('agenda-events-v3', JSON.stringify(eventsData));
+    }
+  }, [eventsData]);
+
+  const syncData = async () => {
+    setSyncStatus('syncing');
+    try {
+      const supabase = getSupabase();
+      
+      // Fetch registrations if user exists
+      if (user) {
+        const { data: regData, error: regError } = await supabase
+          .from('registration')
+          .select('talk_id')
+          .eq('user_id', user.id);
+          
+        if (!regError && regData) {
+          const apiRegistrations = new Set<string>(regData.map(r => r.talk_id));
+          setRegistrations(apiRegistrations);
+        }
+      }
+
+      // Fetch rooms
+      const { data: roomsData, error: roomsError } = await supabase
+        .from('rooms')
+        .select('*');
         
-        // Fetch registrations if user exists
-        if (user) {
-          const { data: regData, error: regError } = await supabase
-            .from('registration')
-            .select('talk_id')
-            .eq('user_id', user.id);
-            
-          if (!regError && regData) {
-            const apiRegistrations = new Set<string>(regData.map(r => r.talk_id));
-            setRegistrations(apiRegistrations);
-          }
-        }
+      if (!roomsError && roomsData && roomsData.length > 0) {
+         setRooms(prev => {
+           const serverRooms = roomsData as Room[];
+           // Merge server rooms with local rooms (server takes precedence for existing, local keeps unsynced)
+           const all = [...serverRooms, ...prev];
+           return Array.from(new Map(all.map(item => [item.id, item])).values());
+         });
+      }
 
-        // Fetch rooms
-        const { data: roomsData, error: roomsError } = await supabase
-          .from('rooms')
-          .select('*');
-          
-        if (!roomsError && roomsData && roomsData.length > 0) {
-           setRooms(roomsData as Room[]);
-        }
-
-        // Fetch talks if existing in DB
-        const { data: talksData, error: talksError } = await supabase
-          .from('talks')
-          .select('*');
-          
-        if (!talksError && talksData && talksData.length > 0) {
-          // Map snake_case to camelCase
-          const mappedTalks = talksData.map((t: any) => ({
+      // Fetch talks if existing in DB
+      const { data: talksData, error: talksError } = await supabase
+        .from('talks')
+        .select('*');
+        
+      if (!talksError && talksData && talksData.length > 0) {
+        let localFallback: AgendaEvent[] = [];
+        try {
+           const saved = localStorage.getItem('agenda-events-v3');
+           if (saved) localFallback = JSON.parse(saved);
+        } catch(e) {}
+        
+        // Map snake_case to camelCase
+        const mappedTalks = talksData.map((t: any) => {
+           const localData = localFallback.find(ev => ev.id === t.id);
+           return {
              id: t.id,
              title: t.title,
              description: t.description || '',
@@ -69,55 +108,67 @@ export function useAgendaData() {
              speakers: t.speakers ? (typeof t.speakers === 'string' ? JSON.parse(t.speakers) : t.speakers) : [],
              registeredCount: t.registered_count || t.registeredCount || 0,
              capacity: t.capacity || 100,
-             organizers: t.organizers || [],
-             moderators: t.moderators || [],
-             summary: t.summary || '',
-             objective: t.objective || ''
-          })) as AgendaEvent[];
-          setEventsData(mappedTalks);
-        } else if (!talksError && (!talksData || talksData.length === 0)) {
-          // Check if we have legacy local storage data
-          let fallbackEvents = INITIAL_EVENTS;
-          try {
-            const saved = localStorage.getItem('agenda-events-v3');
-            if (saved) {
-               const parsed = JSON.parse(saved);
-               if (Array.isArray(parsed) && parsed.length > 0) {
-                 fallbackEvents = parsed;
-               }
-            }
-          } catch(e) {}
-          
-          setEventsData(fallbackEvents);
-          
-          try {
-             // Upsert to Supabase for everyone so it gets populated
-             const formattedTalks = fallbackEvents.map(e => ({
-                id: e.id,
-                title: e.title,
-                description: e.description,
-                start_time: e.startTime,
-                end_time: e.endTime,
-                room_id: e.roomId,
-                type: e.type,
-                theme_tag: e.themeTag,
-                speakers: e.speakers,
-                registered_count: e.registeredCount || 0,
-                capacity: e.capacity || 100
-             }));
-             await supabase.from('talks').upsert(formattedTalks);
-          } catch(err) {
-             console.error('Failed to sync legacy data', err);
+             organizers: t.organizers || localData?.organizers || [],
+             moderators: t.moderators || localData?.moderators || [],
+             summary: t.summary || localData?.summary || '',
+             objective: t.objective || localData?.objective || ''
+           };
+        }) as AgendaEvent[];
+        setEventsData(mappedTalks);
+      } else if (!talksError && (!talksData || talksData.length === 0)) {
+        // Check if we have legacy local storage data
+        let fallbackEvents = INITIAL_EVENTS;
+        try {
+          const saved = localStorage.getItem('agenda-events-v3');
+          if (saved) {
+             const parsed = JSON.parse(saved);
+             if (Array.isArray(parsed) && parsed.length > 0) {
+               fallbackEvents = parsed;
+             }
           }
+        } catch(e) {}
+        
+        setEventsData(fallbackEvents);
+        
+        try {
+           // Upsert to Supabase for everyone so it gets populated
+           const formattedTalks = fallbackEvents.map(e => ({
+              id: e.id,
+              title: e.title,
+              description: e.description,
+              start_time: e.startTime,
+              end_time: e.endTime,
+              room_id: e.roomId,
+              type: e.type,
+              theme_tag: e.themeTag,
+              speakers: e.speakers,
+              registered_count: e.registeredCount || 0,
+              capacity: e.capacity || 100,
+              organizers: e.organizers || [],
+              moderators: e.moderators || [],
+              summary: e.summary || '',
+              objective: e.objective || ''
+           }));
+           await supabase.from('talks').upsert(formattedTalks);
+        } catch(err) {
+           console.error('Failed to sync legacy data', err);
         }
-      } catch (err) {
-        console.error('Failed to fetch from supabase', err);
-      } finally {
-        setLoadingInitial(false);
       }
+      setSyncStatus('success');
+      setLastSynced(new Date());
+    } catch (err) {
+      console.error('Failed to fetch from supabase', err);
+      setSyncStatus('error');
+    }
+  };
+
+  // Fetch initial data from Supabase
+  useEffect(() => {
+    const init = async () => {
+      await syncData();
+      setLoadingInitial(false);
     };
-    
-    fetchUserData();
+    init();
   }, [user]);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -230,5 +281,8 @@ export function useAgendaData() {
     availableDays,
     viewMode,
     setViewMode,
+    syncData,
+    syncStatus,
+    lastSynced,
   };
 }
