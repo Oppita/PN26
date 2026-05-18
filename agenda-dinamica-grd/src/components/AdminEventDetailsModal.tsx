@@ -85,6 +85,67 @@ export function AdminEventDetailsModal({ event, room, onClose }: Props) {
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
+          <div className="space-y-10 mb-10">
+            {/* Conceptual Note / Description */}
+            {event.description && (
+              <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <h4 className="text-xs font-black text-blue-600 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                  <div className="w-8 h-[2px] bg-blue-600"></div> NOTA CONCEPTUAL
+                </h4>
+                <div className="text-sm text-slate-700 leading-relaxed font-medium whitespace-pre-wrap">
+                  {event.description}
+                </div>
+              </section>
+            )}
+
+            {/* Objective & Summary Grid */}
+            {(event.objective || event.summary) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                {event.objective && (
+                   <div>
+                     <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">OBJETIVO</h4>
+                     <p className="text-sm text-slate-600 leading-relaxed italic border-l-4 border-slate-200 pl-4">
+                       "{event.objective}"
+                     </p>
+                   </div>
+                )}
+                {event.summary && (
+                   <div>
+                     <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">RESUMEN</h4>
+                     <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                       {event.summary}
+                     </p>
+                   </div>
+                )}
+              </div>
+            )}
+
+            {/* Speakers Sections */}
+            {event.speakers && event.speakers.length > 0 && (
+              <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <h4 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-2 justify-center">
+                   CONFERENCISTAS & EXPERTOS
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                   {event.speakers.map((speaker, index) => (
+                      <div key={index} className="flex flex-col sm:flex-row gap-4">
+                         <div className="w-20 h-20 rounded-xl overflow-hidden shrink-0 border-2 border-slate-100 shadow-inner">
+                            <img src={speaker.photoUrl || 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=100&h=100&fit=crop'} alt={speaker.name} className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all duration-500" />
+                         </div>
+                         <div>
+                            <p className="font-black text-base text-slate-900 leading-none mb-1">{speaker.name}</p>
+                            <p className="text-[10px] text-blue-600 font-bold uppercase tracking-wide mb-2">{speaker.role}</p>
+                            <p className="text-xs text-slate-500 leading-snug line-clamp-3 md:line-clamp-none italic">
+                               {speaker.bio || 'Consultor experto en gestión del riesgo y resiliencia climática con amplia trayectoria internacional.'}
+                            </p>
+                         </div>
+                      </div>
+                   ))}
+                </div>
+              </section>
+            )}
+          </div>
+
           <div className="flex justify-between items-center mb-6">
              <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
                <Users className="w-4 h-4 text-blue-600" /> Detalle de Inscritos
