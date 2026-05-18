@@ -44,9 +44,7 @@ export function useAgendaData() {
   }, [rooms]);
 
   useEffect(() => {
-    if (eventsData.length > 0) {
-      localStorage.setItem('agenda-events-v3', JSON.stringify(eventsData));
-    }
+    localStorage.setItem('agenda-events-v3', JSON.stringify(eventsData));
   }, [eventsData]);
 
   const syncData = async () => {
@@ -68,90 +66,97 @@ export function useAgendaData() {
       }
 
       // Fetch rooms
-      const { data: roomsData, error: roomsError } = await supabase
+      const { data: fetchRooms, error: roomsError } = await supabase
         .from('rooms')
         .select('*');
         
-      if (!roomsError && roomsData && roomsData.length > 0) {
-         setRooms(prev => {
-           const serverRooms = roomsData as Room[];
-           // Merge server rooms with local rooms (server takes precedence for existing, local keeps unsynced)
-           const all = [...serverRooms, ...prev];
-           return Array.from(new Map(all.map(item => [item.id, item])).values());
-         });
+      if (!roomsError && Array.isArray(fetchRooms)) {
+        if (fetchRooms.length > 0) {
+          setRooms(fetchRooms as Room[]);
+        } else {
+          // Supabase is empty. Check if we have local data to push.
+          if (rooms.length > 0) {
+            console.log('Supabase rooms empty, pushing local state...');
+            await supabase.from('rooms').upsert(rooms);
+          } else {
+            // Both are empty, fallback to INITIAL
+            setRooms(INITIAL_ROOMS);
+            await supabase.from('rooms').upsert(INITIAL_ROOMS);
+          }
+        }
       }
 
-      // Fetch talks if existing in DB
-      const { data: talksData, error: talksError } = await supabase
+      // Fetch talks
+      const { data: fetchTalks, error: talksError } = await supabase
         .from('talks')
         .select('*');
         
-      if (!talksError && talksData && talksData.length > 0) {
-        let localFallback: AgendaEvent[] = [];
-        try {
-           const saved = localStorage.getItem('agenda-events-v3');
-           if (saved) localFallback = JSON.parse(saved);
-        } catch(e) {}
-        
-        // Map snake_case to camelCase
-        const mappedTalks = talksData.map((t: any) => {
-           const localData = localFallback.find(ev => ev.id === t.id);
-           return {
-             id: t.id,
-             title: t.title,
-             description: t.description || '',
-             startTime: t.start_time || t.startTime,
-             endTime: t.end_time || t.endTime,
-             roomId: t.room_id || t.roomId,
-             type: t.type || 'Keynote',
-             themeTag: t.theme_tag || t.themeTag,
-             speakers: t.speakers ? (typeof t.speakers === 'string' ? JSON.parse(t.speakers) : t.speakers) : [],
-             registeredCount: t.registered_count || t.registeredCount || 0,
-             capacity: t.capacity || 100,
-             organizers: t.organizers || localData?.organizers || [],
-             moderators: t.moderators || localData?.moderators || [],
-             summary: t.summary || localData?.summary || '',
-             objective: t.objective || localData?.objective || ''
-           };
-        }) as AgendaEvent[];
-        setEventsData(mappedTalks);
-      } else if (!talksError && (!talksData || talksData.length === 0)) {
-        // Check if we have legacy local storage data
-        let fallbackEvents = INITIAL_EVENTS;
-        try {
-          const saved = localStorage.getItem('agenda-events-v3');
-          if (saved) {
-             const parsed = JSON.parse(saved);
-             if (Array.isArray(parsed) && parsed.length > 0) {
-               fallbackEvents = parsed;
-             }
+      if (!talksError && Array.isArray(fetchTalks)) {
+        if (fetchTalks.length > 0) {
+          // Map snake_case to camelCase
+          const mappedTalks = fetchTalks.map((t: any) => ({
+            id: t.id,
+            title: t.title,
+            description: t.description || '',
+            startTime: t.start_time || t.startTime,
+            endTime: t.end_time || t.endTime,
+            roomId: t.room_id || t.roomId,
+            type: t.type || 'Keynote',
+            themeTag: t.theme_tag || t.themeTag,
+            speakers: t.speakers ? (typeof t.speakers === 'string' ? JSON.parse(t.speakers) : t.speakers) : [],
+            registeredCount: t.registered_count || t.registeredCount || 0,
+            capacity: t.capacity || 100,
+            organizers: t.organizers || [],
+            moderators: t.moderators || [],
+            summary: t.summary || '',
+            objective: t.objective || ''
+          })) as AgendaEvent[];
+          setEventsData(mappedTalks);
+        } else {
+          // Supabase is empty. check local
+          if (eventsData.length > 0) {
+            console.log('Supabase talks empty, pushing local state...');
+            const payload = eventsData.map(e => ({
+                id: e.id,
+                title: e.title,
+                description: e.description,
+                start_time: e.startTime,
+                end_time: e.endTime,
+                room_id: e.roomId,
+                type: e.type,
+                theme_tag: e.themeTag,
+                speakers: e.speakers,
+                registered_count: e.registeredCount || 0,
+                capacity: e.capacity || 100,
+                organizers: e.organizers || [],
+                moderators: e.moderators || [],
+                summary: e.summary || '',
+                objective: e.objective || ''
+            }));
+            await supabase.from('talks').upsert(payload);
+          } else {
+             // Fully empty fallback
+             setEventsData(INITIAL_EVENTS);
+             // push to supabase
+             const payload = INITIAL_EVENTS.map(e => ({
+                id: e.id,
+                title: e.title,
+                description: e.description,
+                start_time: e.startTime,
+                end_time: e.endTime,
+                room_id: e.roomId,
+                type: e.type,
+                theme_tag: e.themeTag,
+                speakers: e.speakers,
+                registered_count: e.registeredCount || 0,
+                capacity: e.capacity || 100,
+                organizers: e.organizers || [],
+                moderators: e.moderators || [],
+                summary: e.summary || '',
+                objective: e.objective || ''
+            }));
+            await supabase.from('talks').upsert(payload);
           }
-        } catch(e) {}
-        
-        setEventsData(fallbackEvents);
-        
-        try {
-           // Upsert to Supabase for everyone so it gets populated
-           const formattedTalks = fallbackEvents.map(e => ({
-              id: e.id,
-              title: e.title,
-              description: e.description,
-              start_time: e.startTime,
-              end_time: e.endTime,
-              room_id: e.roomId,
-              type: e.type,
-              theme_tag: e.themeTag,
-              speakers: e.speakers,
-              registered_count: e.registeredCount || 0,
-              capacity: e.capacity || 100,
-              organizers: e.organizers || [],
-              moderators: e.moderators || [],
-              summary: e.summary || '',
-              objective: e.objective || ''
-           }));
-           await supabase.from('talks').upsert(formattedTalks);
-        } catch(err) {
-           console.error('Failed to sync legacy data', err);
         }
       }
       setSyncStatus('success');
