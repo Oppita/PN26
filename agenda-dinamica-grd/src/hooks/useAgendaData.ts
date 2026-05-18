@@ -1,16 +1,18 @@
 import { useState, useEffect, useMemo } from 'react';
-import { INITIAL_ROOMS, AgendaEvent, Room, EventType } from '../data/agenda';
+import { INITIAL_EVENTS, INITIAL_ROOMS, AgendaEvent, Room, EventType } from '../data/agenda';
 import { getSupabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 
 export function useAgendaData() {
-
   const { user } = useAuth();
 
-  const [eventsData, setEventsData] = useState<AgendaEvent[]>([]);
-  const [rooms, setRooms] = useState<Room[]>(INITIAL_ROOMS);
   const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
   const [registrations, setRegistrations] = useState<Set<string>>(new Set());
+
+  const [rooms, setRooms] = useState<Room[]>(INITIAL_ROOMS);
+
+  // SIEMPRE iniciar con agenda local
+  const [eventsData, setEventsData] = useState<AgendaEvent[]>(INITIAL_EVENTS);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState<EventType | 'All'>('All');
@@ -18,76 +20,117 @@ export function useAgendaData() {
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'All' | 'MyAgenda'>('All');
 
-  // LOAD TALKS
+  // =========================
+  // CARGAR DATOS SUPABASE
+  // =========================
+
   useEffect(() => {
-
-    const loadTalks = async () => {
-
+    const loadSupabase = async () => {
       try {
+        console.log('🚀 Conectando a Supabase...');
 
         const supabase = getSupabase();
 
         const { data, error } = await supabase
           .from('talks')
-          .select('*')
-          .order('start_time', { ascending: true });
+          .select('*');
 
         console.log('SUPABASE TALKS', data);
+        console.log('SUPABASE ERROR', error);
 
-        if (error) {
-          console.error(error);
-          return;
+        // SI EXISTEN DATOS EN SUPABASE
+        if (!error && data && data.length > 0) {
+
+          const mapped: AgendaEvent[] = data.map((t: any) => ({
+            id: t.id,
+            title: t.title,
+            type: t.type || '',
+            roomId: t.room_id || '',
+            startTime: t.start_time,
+            endTime: t.end_time,
+            speakers: t.speakers || [],
+            organizers: t.organizers || [],
+            moderators: t.moderators || [],
+            description: t.description || '',
+            summary: t.summary || '',
+            objective: t.objective || '',
+            registeredCount: t.registered_count || 0,
+            capacity: t.capacity || 100,
+            themeTag: t.theme_tag || ''
+          }));
+
+          console.log('✅ Datos cargados desde Supabase');
+
+          setEventsData(mapped);
+
+        } else {
+
+          // SI SUPABASE ESTÁ VACÍO
+          // SUBIR TODO INITIAL_EVENTS AUTOMÁTICAMENTE
+
+          console.log('⚠️ Supabase vacío. Subiendo agenda local...');
+
+          const payload = INITIAL_EVENTS.map((e) => ({
+            id: e.id,
+            title: e.title,
+            type: e.type,
+            room_id: e.roomId,
+            start_time: e.startTime,
+            end_time: e.endTime,
+            speakers: e.speakers,
+            organizers: e.organizers || [],
+            moderators: e.moderators || [],
+            description: e.description || '',
+            summary: e.summary || '',
+            objective: e.objective || '',
+            registered_count: e.registeredCount || 0,
+            capacity: e.capacity || 100,
+            theme_tag: e.themeTag || ''
+          }));
+
+          const { error: insertError } = await supabase
+            .from('talks')
+            .upsert(payload);
+
+          console.log('UPLOAD RESULT', insertError);
+
+          // mantener local
+          setEventsData(INITIAL_EVENTS);
         }
 
-        const mapped: AgendaEvent[] = data.map((t: any) => ({
-          id: t.id,
-          title: t.title,
-          description: t.description || '',
-          startTime: t.start_time,
-          endTime: t.end_time,
-          roomId: t.room_id,
-          type: t.type || '',
-          themeTag: t.theme_tag || '',
-          speakers: t.speakers || [],
-          organizers: t.organizers || [],
-          moderators: t.moderators || [],
-          summary: t.summary || '',
-          objective: t.objective || '',
-          registeredCount: t.registered_count || 0,
-          capacity: t.capacity || 100
-        }));
-
-        setEventsData(mapped);
-
       } catch (err) {
+        console.error('❌ Error general Supabase', err);
 
-        console.error(err);
+        // fallback seguro
+        setEventsData(INITIAL_EVENTS);
       }
     };
 
-    loadTalks();
-
+    loadSupabase();
   }, []);
 
-  // LOAD USER REGISTRATIONS
-  useEffect(() => {
+  // =========================
+  // QR REGISTRATIONS
+  // =========================
 
+  useEffect(() => {
     if (!user) return;
 
     const loadRegistrations = async () => {
+      try {
+        const supabase = getSupabase();
 
-      const supabase = getSupabase();
+        const { data } = await supabase
+          .from('registration')
+          .select('talk_id')
+          .eq('user_id', user.id);
 
-      const { data, error } = await supabase
-        .from('registrations')
-        .select('talk_id')
-        .eq('user_id', user.id);
+        if (data) {
+          setRegistrations(new Set(data.map((r: any) => r.talk_id)));
+        }
 
-      if (!error && data) {
-
-        setRegistrations(
-          new Set(data.map((r: any) => r.talk_id))
-        );
+      } catch (e) {
+        console.error(e);
       }
     };
 
@@ -95,52 +138,12 @@ export function useAgendaData() {
 
   }, [user]);
 
-  // REGISTER EVENT
-  const registerForEvent = async (eventId: string) => {
-
-    if (!user) return;
-
-    const supabase = getSupabase();
-
-    await supabase
-      .from('registrations')
-      .insert({
-        user_id: user.id,
-        talk_id: eventId
-      });
-
-    setRegistrations(prev => new Set(prev).add(eventId));
-  };
-
-  // CANCEL REGISTRATION
-  const cancelRegistration = async (eventId: string) => {
-
-    if (!user) return;
-
-    const supabase = getSupabase();
-
-    await supabase
-      .from('registrations')
-      .delete()
-      .match({
-        user_id: user.id,
-        talk_id: eventId
-      });
-
-    setRegistrations(prev => {
-
-      const next = new Set(prev);
-
-      next.delete(eventId);
-
-      return next;
-    });
-  };
+  // =========================
+  // BOOKMARKS
+  // =========================
 
   const toggleBookmark = (eventId: string) => {
-
-    setBookmarks(prev => {
-
+    setBookmarks((prev) => {
       const next = new Set(prev);
 
       if (next.has(eventId)) {
@@ -153,59 +156,127 @@ export function useAgendaData() {
     });
   };
 
-  const availableDays = useMemo(() => {
+  // =========================
+  // REGISTRO QR
+  // =========================
 
+  const registerForEvent = async (eventId: string) => {
+
+    if (!user) return;
+
+    setRegistrations((prev) => new Set(prev).add(eventId));
+
+    try {
+
+      const supabase = getSupabase();
+
+      await supabase
+        .from('registration')
+        .upsert({
+          user_id: user.id,
+          talk_id: eventId
+        });
+
+      console.log('✅ Registro guardado');
+
+    } catch (e) {
+      console.error('❌ Error registro', e);
+    }
+  };
+
+  const cancelRegistration = async (eventId: string) => {
+
+    if (!user) return;
+
+    const next = new Set(registrations);
+    next.delete(eventId);
+
+    setRegistrations(next);
+
+    try {
+
+      const supabase = getSupabase();
+
+      await supabase
+        .from('registration')
+        .delete()
+        .match({
+          user_id: user.id,
+          talk_id: eventId
+        });
+
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // =========================
+  // AVAILABLE DAYS
+  // =========================
+
+  const availableDays = useMemo(() => {
     return Array.from(
       new Set(eventsData.map(e => e.startTime.split('T')[0]))
     ).sort();
-
   }, [eventsData]);
 
   useEffect(() => {
-
     if (!selectedDay && availableDays.length > 0) {
       setSelectedDay(availableDays[0]);
     }
-
   }, [availableDays]);
+
+  // =========================
+  // FILTROS
+  // =========================
 
   const filteredEvents = useMemo(() => {
 
-    return eventsData.filter(event => {
+    return eventsData.filter((event) => {
 
       if (
         selectedDay &&
         event.startTime.split('T')[0] !== selectedDay &&
         viewMode !== 'MyAgenda'
-      ) return false;
+      ) {
+        return false;
+      }
 
       if (
         viewMode === 'MyAgenda' &&
         !bookmarks.has(event.id) &&
         !registrations.has(event.id)
-      ) return false;
+      ) {
+        return false;
+      }
 
       if (
         selectedRoom !== 'All' &&
         event.roomId !== selectedRoom
-      ) return false;
+      ) {
+        return false;
+      }
 
       if (
         selectedType !== 'All' &&
         event.type !== selectedType
-      ) return false;
+      ) {
+        return false;
+      }
 
       if (searchQuery) {
 
-        const q = searchQuery.toLowerCase();
+        const query = searchQuery.toLowerCase();
 
-        const title = event.title.toLowerCase();
+        const matchesTitle =
+          event.title.toLowerCase().includes(query);
 
-        const speakers = event.speakers.some(
-          (s: any) => s.name?.toLowerCase().includes(q)
-        );
+        const matchesSpeakers =
+          event.speakers.some((s) =>
+            s.name.toLowerCase().includes(query)
+          );
 
-        if (!title.includes(q) && !speakers) {
+        if (!matchesTitle && !matchesSpeakers) {
           return false;
         }
       }
@@ -217,13 +288,17 @@ export function useAgendaData() {
   }, [
     eventsData,
     selectedDay,
-    viewMode,
-    bookmarks,
-    registrations,
     selectedRoom,
     selectedType,
-    searchQuery
+    searchQuery,
+    bookmarks,
+    registrations,
+    viewMode
   ]);
+
+  // =========================
+  // GROUPED EVENTS
+  // =========================
 
   const groupedEvents = useMemo(() => {
 
@@ -231,15 +306,18 @@ export function useAgendaData() {
 
     filteredEvents.forEach(event => {
 
-      const day = event.startTime.split('T')[0];
+      const dateKey = event.startTime.split('T')[0];
+      const timeKey = event.startTime;
 
-      const time = event.startTime;
+      if (!groups[dateKey]) {
+        groups[dateKey] = {};
+      }
 
-      if (!groups[day]) groups[day] = {};
+      if (!groups[dateKey][timeKey]) {
+        groups[dateKey][timeKey] = [];
+      }
 
-      if (!groups[day][time]) groups[day][time] = [];
-
-      groups[day][time].push(event);
+      groups[dateKey][timeKey].push(event);
     });
 
     return groups;
@@ -248,8 +326,8 @@ export function useAgendaData() {
 
   return {
     events: eventsData,
-    groupedEvents,
     filteredEvents,
+    groupedEvents,
     rooms,
     setRooms,
     setEventsData,
@@ -268,6 +346,6 @@ export function useAgendaData() {
     setSelectedDay,
     availableDays,
     viewMode,
-    setViewMode
+    setViewMode,
   };
 }
