@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Calendar, Bookmark, Settings, QrCode, Users, LogOut, Cloud, CloudOff, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Toaster } from 'sonner';
 import { useAgendaData } from './hooks/useAgendaData';
 import { FilterBar } from './components/FilterBar';
 import { AgendaCard } from './components/AgendaCard';
@@ -83,14 +84,15 @@ function MainApp() {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden text-slate-800 bg-slate-50">
+      <Toaster position="top-right" richColors />
       {/* Header */}
-      <header className="h-16 bg-slate-900 text-white flex items-center justify-between px-6 shrink-0 z-40">
-        <div className="flex items-center gap-4">
-          <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center font-black text-xl italic uppercase">P</div>
-          <div className="flex items-center gap-4">
+      <header className="h-auto min-h-16 py-3 lg:py-0 lg:h-16 bg-slate-900 text-white flex flex-col lg:flex-row items-center justify-between px-6 shrink-0 z-40 gap-4 lg:gap-0">
+        <div className="flex items-center gap-4 w-full lg:w-auto overflow-x-auto scrollbar-hide pb-1 lg:pb-0">
+          <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center font-black text-xl italic uppercase shrink-0">P</div>
+          <div className="flex items-center gap-4 shrink-0">
             <div>
               <h1 className="text-xl font-black tracking-tight leading-none uppercase">PN26</h1>
-              <p className="text-[10px] text-slate-400 font-bold tracking-widest mt-1 uppercase">Plataforma de Navegación</p>
+              <p className="text-[10px] text-slate-400 font-bold tracking-widest mt-1 uppercase hidden sm:block">Plataforma de Navegación</p>
             </div>
             
             {/* Sync Indicator */}
@@ -98,47 +100,47 @@ function MainApp() {
               <button 
                 onClick={syncData}
                 title={`Forzar Sincronización. Última act: ${lastSynced ? lastSynced.toLocaleTimeString() : 'N/A'}`}
-                className="ml-4 flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded border border-slate-700 transition"
+                className="ml-2 sm:ml-4 flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded border border-slate-700 transition"
               >
                 {syncStatus === 'syncing' && <RefreshCw className="w-3.5 h-3.5 text-blue-400 animate-spin" />}
                 {syncStatus === 'success' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />}
                 {syncStatus === 'error' && <CloudOff className="w-3.5 h-3.5 text-red-400" />}
                 {syncStatus === 'idle' && <Cloud className="w-3.5 h-3.5 text-slate-400" />}
                 
-                <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">
+                <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wider hidden md:inline-block">
                   {syncStatus === 'syncing' ? 'Sincronizando...' : syncStatus === 'success' ? 'Al día' : syncStatus === 'error' ? 'Error Sync' : 'Sync'}
                 </span>
               </button>
             )}
           </div>
         </div>
-        <div className="flex gap-3 items-center">
+        <div className="flex gap-2 sm:gap-3 items-center w-full lg:w-auto overflow-x-auto scrollbar-hide pb-1 lg:pb-0">
           {isAdmin && (
             <>
               <button 
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-indigo-500 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-white shadow-lg"
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-indigo-500 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-white shadow-lg shrink-0"
                 onClick={() => openQRHub('DIRECTORY')}
               >
-                <Users className="w-3.5 h-3.5" /> Directorio
+                <Users className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Directorio</span>
               </button>
               <button 
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-blue-500 bg-blue-600 hover:bg-blue-500 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-white shadow-lg"
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-blue-500 bg-blue-600 hover:bg-blue-500 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-white shadow-lg shrink-0"
                 onClick={() => openQRHub('ROOM')}
               >
-                <QrCode className="w-3.5 h-3.5" /> Escáner
+                <QrCode className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Escáner</span>
               </button>
               <button 
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-700 bg-slate-800 hover:bg-slate-700 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest"
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-700 bg-slate-800 hover:bg-slate-700 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest shrink-0"
                 onClick={() => setIsAdminOpen(true)}
               >
-                <Settings className="w-3.5 h-3.5" /> Configurar
+                <Settings className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Config</span>
               </button>
               <button 
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-red-900 bg-red-950 hover:bg-red-900 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-red-200"
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-red-900 bg-red-950 hover:bg-red-900 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-red-200 shrink-0"
                 onClick={() => signOut()}
                 title="Salir del modo administrador"
               >
-                <LogOut className="w-3.5 h-3.5" />
+                <LogOut className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Salir</span>
               </button>
             </>
           )}
