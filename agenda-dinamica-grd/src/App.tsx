@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calendar, Bookmark, Settings, QrCode, Users } from 'lucide-react';
+import { Calendar, Bookmark, Settings, QrCode, Users, LogOut } from 'lucide-react';
 import { useAgendaData } from './hooks/useAgendaData';
 import { FilterBar } from './components/FilterBar';
 import { AgendaCard } from './components/AgendaCard';
@@ -14,7 +14,21 @@ import { Room, AgendaEvent } from './data/agenda';
 import { useAuth } from './context/AuthContext';
 
 export default function App() {
-  const { user, isAdmin } = useAuth();
+  const { loading } = useAuth();
+  
+  if (loading) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-slate-50">
+        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  return <MainApp />;
+}
+
+function MainApp() {
+  const { isAdmin, signOut } = useAuth();
   const {
     events,
     groupedEvents,
@@ -95,6 +109,13 @@ export default function App() {
                 onClick={() => setIsAdminOpen(true)}
               >
                 <Settings className="w-3.5 h-3.5" /> Configurar
+              </button>
+              <button 
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-red-900 bg-red-950 hover:bg-red-900 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-red-200"
+                onClick={() => signOut()}
+                title="Salir del modo administrador"
+              >
+                <LogOut className="w-3.5 h-3.5" />
               </button>
             </>
           )}
