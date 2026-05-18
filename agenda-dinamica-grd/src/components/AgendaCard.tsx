@@ -58,9 +58,15 @@ export function AgendaCard({ event, room, isBookmarked, onToggleBookmark, onClic
           </button>
         </div>
 
-        <h3 className="font-black text-sm md:text-base leading-tight mb-4 flex-grow text-slate-900 group-hover/card:text-blue-600 transition-colors">
+        <h3 className="font-black text-sm md:text-base leading-tight mb-2 flex-grow text-slate-900 group-hover/card:text-blue-600 transition-colors">
           {event.title}
         </h3>
+        
+        {(event.summary || event.description) && (
+          <p className="text-xs text-slate-600 line-clamp-2 mb-4 leading-relaxed flex-grow">
+            {event.summary || event.description}
+          </p>
+        )}
 
         <div className="space-y-2 mt-auto">
           <div className="flex items-center gap-2 text-xs font-bold text-slate-500 bg-slate-50 w-fit px-2 py-1 rounded-md">
@@ -83,18 +89,33 @@ export function AgendaCard({ event, room, isBookmarked, onToggleBookmark, onClic
             </div>
           )}
 
-          {event.speakers && event.speakers.length > 0 && (
+          {((event.speakers && event.speakers.length > 0) || (event.moderators && event.moderators.length > 0)) && (
             <div className="flex items-start gap-2 pt-3 mt-3 border-t border-slate-100">
               <Users className="w-3.5 h-3.5 text-slate-400 mt-1 shrink-0" />
-              <div className="flex flex-wrap gap-1.5">
-                 {event.speakers.map((s, i) => (
-                   <span key={i} className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-bold whitespace-nowrap border border-slate-200">
-                     {s.name}
-                   </span>
-                 ))}
+              <div className="flex flex-col gap-2">
+                 {event.speakers && event.speakers.length > 0 && (
+                   <div className="flex flex-wrap gap-1.5">
+                     {event.speakers.map((s, i) => (
+                       <span key={i} className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-bold whitespace-nowrap border border-slate-200">
+                         {s.name}
+                       </span>
+                     ))}
+                   </div>
+                 )}
+                 {event.moderators && event.moderators.length > 0 && (
+                   <div className="flex flex-wrap gap-1.5">
+                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider self-center mr-1">Mod:</span>
+                     {event.moderators.map((name, i) => (
+                       <span key={i} className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded font-bold whitespace-nowrap border border-amber-200">
+                         {name}
+                       </span>
+                     ))}
+                   </div>
+                 )}
               </div>
             </div>
           )}
+
 
           {room && event.registeredCount !== undefined && (
             <div className="flex justify-between items-center bg-slate-50 rounded-xl px-3 py-2 mt-3 border border-slate-100">
