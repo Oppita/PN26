@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { Room, AgendaEvent, EventType } from '../data/agenda';
-import { X, Plus, Save, Trash2, Edit } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Room, AgendaEvent, EventType, Speaker } from '../data/agenda';
+import { X, Plus, Save, Trash2, Edit, Download, Upload } from 'lucide-react';
 import { getSupabase } from '../lib/supabaseClient';
+import Papa from 'papaparse';
 
 interface AdminPanelProps {
   rooms: Room[];
@@ -92,6 +93,88 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose }: Admi
     } catch(err) {
       console.error(err);
     }
+  };
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const exportCSV = () => {
+    // Only keeping fundamental fields for easier CSV format
+    const flatEvents = events.map(e => ({
+      ...e,
+      speakers: JSON.stringify(e.speakers || []),
+      organizers: e.organizers?.join(', ') || '',
+      moderators: e.moderators?.join(', ') || ''
+    }));
+    
+    const csv = Papa.unparse(flatEvents);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.setAttribute('download', `agenda_export_${new Date().toISOString()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const importCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        try {
+          const importedEvents = results.data.map((row: any) => ({
+            id: row.id,
+            title: row.title,
+            description: row.description,
+            startTime: row.startTime,
+            endTime: row.endTime,
+            roomId: row.roomId,
+            type: row.type || 'Sesión paralela y temática',
+            themeTag: row.themeTag,
+            speakers: (row.speakers && typeof row.speakers === 'string' && row.speakers.startsWith('[')) 
+              ? JSON.parse(row.speakers) : [],
+            registeredCount: parseInt(row.registeredCount) || 0,
+            capacity: parseInt(row.capacity) || 100,
+            organizers: row.organizers ? row.organizers.split(',').map((s: string) => s.trim()) : [],
+            moderators: row.moderators ? row.moderators.split(',').map((s: string) => s.trim()) : [],
+            summary: row.summary,
+            objective: row.objective
+          })) as AgendaEvent[];
+
+          // Update local state
+          setEvents(importedEvents);
+          alert(`Éxito al importar ${importedEvents.length} eventos. Sincronizando con Supabase...`);
+          
+          // Bulk Upsert in Supabase
+          const supabase = getSupabase();
+          const supabasePayload = importedEvents.map(e => ({
+            id: e.id,
+            title: e.title,
+            description: e.description,
+            start_time: e.startTime,
+            end_time: e.endTime,
+            room_id: e.roomId,
+            type: e.type,
+            theme_tag: e.themeTag,
+            speakers: e.speakers,
+            registered_count: e.registeredCount,
+            capacity: e.capacity
+          }));
+          
+          await supabase.from('talks').upsert(supabasePayload);
+        } catch (error) {
+          console.error("Error importing CSV:", error);
+          alert("Hubo un error importando el CSV. Asegúrate de que el formato sea el correcto.");
+        }
+        
+        // Reset file input
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    });
   };
 
   return (
@@ -192,12 +275,35 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose }: Admi
                 <>
                   <div className="flex justify-between items-center">
                     <h3 className="font-bold text-slate-700">Listado de Charlas y Plenarias</h3>
-                    <button 
-                      onClick={() => setEditingEvent({ title: '', roomId: rooms[0]?.id || '', type: 'Plenaria', startTime: '2026-05-20T08:00', endTime: '2026-05-20T09:00', speakers: [], registeredCount: 0 })}
-                      className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-emerald-700"
-                    >
-                      <Plus className="w-4 h-4"/> Charla
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="file" 
+                        accept=".csv" 
+                        className="hidden" 
+                        ref={fileInputRef} 
+                        onChange={importCSV}
+                      />
+                      <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="bg-slate-100 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-slate-200"
+                        title="Importar CSV"
+                      >
+                        <Upload className="w-4 h-4"/>
+                      </button>
+                      <button 
+                        onClick={exportCSV}
+                        className="bg-slate-100 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-slate-200"
+                        title="Exportar CSV"
+                      >
+                        <Download className="w-4 h-4"/>
+                      </button>
+                      <button 
+                        onClick={() => setEditingEvent({ title: '', roomId: rooms[0]?.id || '', type: 'Plenaria', startTime: '2026-05-20T08:00', endTime: '2026-05-20T09:00', speakers: [], registeredCount: 0 })}
+                        className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-emerald-700 ml-2"
+                      >
+                        <Plus className="w-4 h-4"/> Charla
+                      </button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-1 gap-3">
                     {events.map((event, i) => (
