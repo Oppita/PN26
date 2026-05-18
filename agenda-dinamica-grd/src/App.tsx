@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calendar, Bookmark, Settings, QrCode, Users, LogOut } from 'lucide-react';
+import { Calendar, Bookmark, Settings, QrCode, Users } from 'lucide-react';
 import { useAgendaData } from './hooks/useAgendaData';
 import { FilterBar } from './components/FilterBar';
 import { AgendaCard } from './components/AgendaCard';
@@ -12,20 +12,9 @@ import { InteractiveMap } from './components/InteractiveMap';
 import { formatTime, classNames } from './lib/utils';
 import { Room, AgendaEvent } from './data/agenda';
 import { useAuth } from './context/AuthContext';
-import { LoginPage } from './components/LoginPage';
 
 export default function App() {
-  const { user } = useAuth();
-  
-  if (!user) {
-    return <LoginPage />;
-  }
-  
-  return <MainApp />;
-}
-
-function MainApp() {
-  const { user, isAdmin, signOut } = useAuth();
+  const { user, isAdmin } = useAuth();
   const {
     events,
     groupedEvents,
@@ -80,10 +69,10 @@ function MainApp() {
       {/* Header */}
       <header className="h-16 bg-slate-900 text-white flex items-center justify-between px-6 shrink-0 z-40">
         <div className="flex items-center gap-4">
-          <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center font-black text-xl italic uppercase">G</div>
+          <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center font-black text-xl italic uppercase">P</div>
           <div>
-            <h1 className="text-xl font-black tracking-tight leading-none uppercase">Agenda GRD</h1>
-            <p className="text-[10px] text-slate-400 font-bold tracking-widest mt-1 uppercase">V Encuentro Nacional</p>
+            <h1 className="text-xl font-black tracking-tight leading-none uppercase">PN26</h1>
+            <p className="text-[10px] text-slate-400 font-bold tracking-widest mt-1 uppercase">Plataforma de Navegación</p>
           </div>
         </div>
         <div className="flex gap-3 items-center">
@@ -109,12 +98,6 @@ function MainApp() {
               </button>
             </>
           )}
-          <button 
-            className="flex items-center gap-1.5 px-3 py-1.5 border border-red-900 bg-red-950 hover:bg-red-900 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-red-200"
-            onClick={() => signOut()}
-          >
-            <LogOut className="w-3.5 h-3.5" /> Salir
-          </button>
         </div>
       </header>
 
