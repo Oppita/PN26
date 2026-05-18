@@ -1,451 +1,301 @@
-import React, { useState, useRef } from 'react';
-import { Room, AgendaEvent, EventType, Speaker } from '../data/agenda';
-import { X, Plus, Save, Trash2, Edit, Download, Upload } from 'lucide-react';
-import { getSupabase } from '../lib/supabaseClient';
-import Papa from 'papaparse';
+import React, { useState } from 'react';
+import { Calendar, Bookmark, Settings, QrCode, Users, LogOut } from 'lucide-react';
+import { useAgendaData } from './hooks/useAgendaData';
+import { FilterBar } from './components/FilterBar';
+import { AgendaCard } from './components/AgendaCard';
+import { RoomModal } from './components/RoomModal';
+import { EventModal } from './components/EventModal';
+import { AdminEventDetailsModal } from './components/AdminEventDetailsModal';
+import { AdminPanel } from './components/AdminPanel';
+import { QRControlPanel } from './components/QRControlPanel';
+import { InteractiveMap } from './components/InteractiveMap';
+import { formatTime, classNames } from './lib/utils';
+import { Room, AgendaEvent } from './data/agenda';
+import { useAuth } from './context/AuthContext';
 
-interface AdminPanelProps {
-  rooms: Room[];
-  setRooms: React.Dispatch<React.SetStateAction<Room[]>>;
-  events: AgendaEvent[];
-  setEvents: React.Dispatch<React.SetStateAction<AgendaEvent[]>>;
-  onClose: () => void;
+export default function App() {
+  const { loading } = useAuth();
+  
+  if (loading) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-slate-50">
+        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  return <MainApp />;
 }
 
-export function AdminPanel({ rooms, setRooms, events, setEvents, onClose }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'rooms' | 'events'>('rooms');
-  
-  // Room form state
-  const [editingRoom, setEditingRoom] = useState<Partial<Room> | null>(null);
-  
-  // Event form state
-  const [editingEvent, setEditingEvent] = useState<Partial<AgendaEvent> | null>(null);
+function MainApp() {
+  const { isAdmin, signOut } = useAuth();
+  const {
+    events,
+    groupedEvents,
+    rooms,
+    setRooms,
+    setEventsData,
+    bookmarks,
+    toggleBookmark,
+    registrations,
+    registerForEvent,
+    cancelRegistration,
+    searchQuery,
+    setSearchQuery,
+    selectedType,
+    setSelectedType,
+    selectedRoom,
+    setSelectedRoom,
+    viewMode,
+    setViewMode,
+    selectedDay,
+    setSelectedDay,
+    availableDays,
+  } = useAgendaData();
 
-  const deleteRoom = (id: string) => {
-    if (confirm('¿Eliminar subevento? Esto no eliminará las charlas asociadas pero quedarán sin sala asignada.')) {
-      setRooms(rooms.filter(r => r.id !== id));
-      // Missing room sync to supabase, but we are not doing a rooms table right now.
-    }
+  const [activeRoomModal, setActiveRoomModal] = useState<Room | null>(null);
+  const [activeEventModal, setActiveEventModal] = useState<AgendaEvent | null>(null);
+  const [activeAdminEventModal, setActiveAdminEventModal] = useState<AgendaEvent | null>(null);
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [isQRHubOpen, setIsQRHubOpen] = useState(false);
+  const [qrHubInitialTab, setQrHubInitialTab] = useState<'ROOM' | 'MEAL' | 'DIRECTORY'>('ROOM');
+
+  const handleRoomClick = (roomId: string) => {
+    const room = rooms.find(r => r.id === roomId) || null;
+    setActiveRoomModal(room);
   };
 
-  const deleteEvent = async (id: string) => {
-    if (confirm('¿Eliminar esta charla permanentemente?')) {
-      const prevEvents = [...events];
-      setEvents(events.filter(e => e.id !== id));
-      try {
-        const supabase = getSupabase();
-        await supabase.from('talks').delete().match({ id });
-      } catch(err) {
-        setEvents(prevEvents);
-        console.error(err);
-      }
-    }
+  const openQRHub = (tab: 'ROOM' | 'MEAL' | 'DIRECTORY') => {
+    setQrHubInitialTab(tab);
+    setIsQRHubOpen(true);
   };
 
-  const saveRoom = () => {
-    if (!editingRoom?.name || !editingRoom?.id) return;
-    
-    // Check if new or edit
-    const exists = rooms.some(r => r.id === editingRoom.id);
-    if (exists && editingRoom.id !== 'new') {
-      setRooms(rooms.map(r => r.id === editingRoom.id ? editingRoom as Room : r));
+  const handleCardClick = (event: AgendaEvent) => {
+    if (isAdmin) {
+      setActiveAdminEventModal(event);
     } else {
-      // Add new
-      const id = editingRoom.id === 'new' ? editingRoom.name.toLowerCase().replace(/\s+/g, '-') : editingRoom.id;
-      setRooms([...rooms, { ...editingRoom, id } as Room]);
+      setActiveEventModal(event);
     }
-    setEditingRoom(null);
-  };
-
-  const saveEvent = async () => {
-    if (!editingEvent?.title || !editingEvent?.roomId) return;
-    const isEditing = !!editingEvent.id;
-    const id = isEditing ? editingEvent.id! : `evt-${Date.now()}`;
-    const newEvent = { ...editingEvent, id, speakers: editingEvent.speakers || [] } as AgendaEvent;
-    
-    // Optimistic Update
-    setEvents(events.map(e => e.id === editingEvent.id ? newEvent : e));
-    if (!isEditing) setEvents([...events, newEvent]);
-    setEditingEvent(null);
-
-    // Supabase Sync
-    try {
-      const supabase = getSupabase();
-      const payload = {
-        id: newEvent.id,
-        title: newEvent.title,
-        description: newEvent.description,
-        start_time: newEvent.startTime,
-        end_time: newEvent.endTime,
-        room_id: newEvent.roomId,
-        type: newEvent.type,
-        theme_tag: newEvent.themeTag,
-        speakers: newEvent.speakers,
-        registered_count: newEvent.registeredCount || 0,
-        capacity: newEvent.capacity || 100
-      };
-      
-      if (isEditing) {
-        await supabase.from('talks').update(payload).match({ id });
-      } else {
-        await supabase.from('talks').insert([payload]);
-      }
-    } catch(err) {
-      console.error(err);
-    }
-  };
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const exportCSV = () => {
-    // Only keeping fundamental fields for easier CSV format
-    const flatEvents = events.map(e => ({
-      ...e,
-      speakers: JSON.stringify(e.speakers || []),
-      organizers: e.organizers?.join(', ') || '',
-      moderators: e.moderators?.join(', ') || ''
-    }));
-    
-    const csv = Papa.unparse(flatEvents);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.href = url;
-    link.setAttribute('download', `agenda_export_${new Date().toISOString()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const importCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (results) => {
-        try {
-          const importedEvents = results.data.map((row: any) => ({
-            id: row.id,
-            title: row.title,
-            description: row.description,
-            startTime: row.startTime,
-            endTime: row.endTime,
-            roomId: row.roomId,
-            type: row.type || 'Sesión paralela y temática',
-            themeTag: row.themeTag,
-            speakers: (row.speakers && typeof row.speakers === 'string' && row.speakers.startsWith('[')) 
-              ? JSON.parse(row.speakers) : [],
-            registeredCount: parseInt(row.registeredCount) || 0,
-            capacity: parseInt(row.capacity) || 100,
-            organizers: row.organizers ? row.organizers.split(',').map((s: string) => s.trim()) : [],
-            moderators: row.moderators ? row.moderators.split(',').map((s: string) => s.trim()) : [],
-            summary: row.summary,
-            objective: row.objective
-          })) as AgendaEvent[];
-
-          // Update local state
-          setEvents(importedEvents);
-          alert(`Éxito al importar ${importedEvents.length} eventos. Sincronizando con Supabase...`);
-          
-          // Bulk Upsert in Supabase
-          const supabase = getSupabase();
-          const supabasePayload = importedEvents.map(e => ({
-            id: e.id,
-            title: e.title,
-            description: e.description,
-            start_time: e.startTime,
-            end_time: e.endTime,
-            room_id: e.roomId,
-            type: e.type,
-            theme_tag: e.themeTag,
-            speakers: e.speakers,
-            registered_count: e.registeredCount,
-            capacity: e.capacity
-          }));
-          
-          await supabase.from('talks').upsert(supabasePayload);
-        } catch (error) {
-          console.error("Error importing CSV:", error);
-          alert("Hubo un error importando el CSV. Asegúrate de que el formato sea el correcto.");
-        }
-        
-        // Reset file input
-        if (fileInputRef.current) fileInputRef.current.value = '';
-      }
-    });
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex justify-end">
-      <div className="w-full max-w-2xl bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right-full duration-300">
-        <header className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-          <h2 className="text-xl font-bold text-slate-800">Panel de Configuración</h2>
-          <button onClick={onClose} className="p-2 text-slate-500 hover:text-red-500 hover:bg-slate-200 rounded-full transition-colors">
-            <X className="w-5 h-5" />
-          </button>
-        </header>
+    <div className="h-screen flex flex-col overflow-hidden text-slate-800 bg-slate-50">
+      {/* Header */}
+      <header className="h-16 bg-slate-900 text-white flex items-center justify-between px-6 shrink-0 z-40">
+        <div className="flex items-center gap-4">
+          <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center font-black text-xl italic uppercase">P</div>
+          <div>
+            <h1 className="text-xl font-black tracking-tight leading-none uppercase">PN26</h1>
+            <p className="text-[10px] text-slate-400 font-bold tracking-widest mt-1 uppercase">Plataforma de Navegación</p>
+          </div>
+        </div>
+        <div className="flex gap-3 items-center">
+          {isAdmin && (
+            <>
+              <button 
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-indigo-500 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-white shadow-lg"
+                onClick={() => openQRHub('DIRECTORY')}
+              >
+                <Users className="w-3.5 h-3.5" /> Directorio
+              </button>
+              <button 
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-blue-500 bg-blue-600 hover:bg-blue-500 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-white shadow-lg"
+                onClick={() => openQRHub('ROOM')}
+              >
+                <QrCode className="w-3.5 h-3.5" /> Escáner
+              </button>
+              <button 
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-700 bg-slate-800 hover:bg-slate-700 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest"
+                onClick={() => setIsAdminOpen(true)}
+              >
+                <Settings className="w-3.5 h-3.5" /> Configurar
+              </button>
+              <button 
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-red-900 bg-red-950 hover:bg-red-900 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-red-200"
+                onClick={() => signOut()}
+                title="Salir del modo administrador"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
+        </div>
+      </header>
 
-        <div className="flex px-4 border-b border-slate-200 bg-slate-50 shrink-0">
-          <button 
-            className={`py-3 px-4 font-bold text-sm border-b-2 ${activeTab === 'rooms' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500'}`}
-            onClick={() => setActiveTab('rooms')}
-          >
-            Subeventos (Salas)
-          </button>
-          <button 
-            className={`py-3 px-4 font-bold text-sm border-b-2 ${activeTab === 'events' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500'}`}
-            onClick={() => setActiveTab('events')}
-          >
-            Charlas (Contenido)
-          </button>
+      <div className="flex-1 flex flex-col overflow-hidden bg-slate-50">
+        
+        {/* Hero Interactive Map */}
+        <div className="h-[35vh] lg:h-[45vh] shrink-0 border-b border-slate-200 relative z-10 shadow-sm bg-white">
+            <InteractiveMap rooms={rooms} onSelectRoom={(id) => setSelectedRoom(prev => prev === id ? 'All' : id)} />
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
-          
-          {/* ROOMS TAB */}
-          {activeTab === 'rooms' && (
-            <div className="space-y-6">
-              {!editingRoom ? (
-                <>
-                  <div className="flex justify-between items-center">
-                    <h3 className="font-bold text-slate-700">Listado de Subeventos</h3>
-                    <button 
-                      onClick={() => setEditingRoom({ id: 'new', name: '', capacity: 0, location: '', color: '#3b82f6' })}
-                      className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-blue-700"
+        <div className="flex-1 flex overflow-hidden">
+          {/* Sidebar */}
+          <aside className="hidden lg:flex w-80 bg-white border-r border-slate-200 p-6 flex-col gap-8 overflow-y-auto relative z-20">
+               <div className="relative z-10">
+                 <FilterBar 
+                    searchQuery={searchQuery}
+                    setSearchQuery={setSearchQuery}
+                    selectedType={selectedType}
+                    setSelectedType={setSelectedType}
+                    selectedRoom={selectedRoom}
+                    setSelectedRoom={setSelectedRoom}
+                    rooms={rooms}
+                  />
+               </div>
+          </aside>
+
+          <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 relative">
+            
+            {/* Days & Main Navigation */}
+            <div className="bg-white border-b border-slate-200 px-6 py-4 flex flex-col sm:flex-row justify-between items-center gap-4 shrink-0 shadow-sm z-30">
+               <div className="flex bg-slate-100 p-1 rounded-xl w-full sm:w-auto overflow-x-auto scroller-hide">
+                  {availableDays.map((day, index) => (
+                    <button
+                      key={day}
+                      onClick={() => setSelectedDay(day)}
+                      className={classNames(
+                        "flex-1 sm:flex-none px-6 py-2.5 rounded-lg text-[10px] font-black transition-all uppercase tracking-widest whitespace-nowrap",
+                        selectedDay === day 
+                          ? "bg-white text-slate-800 shadow-sm scale-[1.02] border border-slate-200" 
+                          : "text-slate-500 hover:text-slate-800"
+                      )}
                     >
-                      <Plus className="w-4 h-4"/> Subevento
+                      DÍA {index + 1}
                     </button>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3">
-                    {rooms.map(room => (
-                      <div key={room.id} className="bg-white p-4 border border-slate-200 rounded-xl flex items-center justify-between shadow-sm">
-                        <div className="flex items-center gap-3">
-                          <div className="w-4 h-4 rounded-full border border-slate-200" style={{ backgroundColor: room.color }}></div>
-                          <div>
-                            <p className="font-bold text-sm text-slate-800">{room.name}</p>
-                            <p className="text-[10px] text-slate-500 uppercase tracking-widest">{room.location}</p>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <button onClick={() => setEditingRoom(room)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit className="w-4 h-4"/></button>
-                          <button onClick={() => deleteRoom(room.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4"/></button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className="bg-white p-6 border border-slate-200 rounded-xl shadow-sm space-y-4">
-                  <h3 className="font-bold text-slate-800 border-b pb-2">{editingRoom.id === 'new' ? 'Crear Subevento' : 'Editar Subevento'}</h3>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Nombre (ej. Resiliencia)</label>
-                      <input type="text" className="w-full border rounded p-2 text-sm" value={editingRoom.name || ''} onChange={e => setEditingRoom({...editingRoom, name: e.target.value})} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Ubicación física</label>
-                        <input type="text" className="w-full border rounded p-2 text-sm" value={editingRoom.location || ''} onChange={e => setEditingRoom({...editingRoom, location: e.target.value})} />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Aforo (Personas)</label>
-                        <input type="number" className="w-full border rounded p-2 text-sm" value={editingRoom.capacity || 0} onChange={e => setEditingRoom({...editingRoom, capacity: parseInt(e.target.value)})} />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Color representativo</label>
-                      <input type="color" className="w-full h-10 border rounded p-1 cursor-pointer" value={editingRoom.color || '#000000'} onChange={e => setEditingRoom({...editingRoom, color: e.target.value})} />
-                    </div>
-                  </div>
-                  <div className="flex justify-end gap-2 pt-4">
-                    <button onClick={() => setEditingRoom(null)} className="px-4 py-2 text-slate-600 text-sm font-medium hover:bg-slate-100 rounded">Cancelar</button>
-                    <button onClick={saveRoom} className="px-4 py-2 bg-slate-900 text-white text-sm font-bold flex items-center gap-2 rounded hover:bg-slate-800"><Save className="w-4 h-4"/> Guardar</button>
-                  </div>
-                </div>
-              )}
+                  ))}
+                  {availableDays.length === 0 && (
+                     <div className="px-6 py-2.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">Aún no hay días</div>
+                  )}
+               </div>
+
+               <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0 scroller-hide">
+                  <button 
+                    onClick={() => setViewMode('All')}
+                    className={classNames(
+                      "px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border",
+                      viewMode === 'All' ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                    )}
+                  >
+                    AGENDA GENERAL
+                  </button>
+                  <button 
+                    onClick={() => setViewMode('MyAgenda')}
+                    className={classNames(
+                      "px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap border",
+                      viewMode === 'MyAgenda' ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                    )}
+                  >
+                    <Bookmark className="w-3.5 h-3.5" /> MIS SESIONES ({bookmarks.size})
+                  </button>
+               </div>
             </div>
-          )}
 
-          {/* EVENTS TAB */}
-          {activeTab === 'events' && (
-            <div className="space-y-6">
-              {!editingEvent ? (
-                <>
-                  <div className="flex justify-between items-center">
-                    <h3 className="font-bold text-slate-700">Listado de Charlas y Plenarias</h3>
-                    <div className="flex items-center gap-2">
-                      <input 
-                        type="file" 
-                        accept=".csv" 
-                        className="hidden" 
-                        ref={fileInputRef} 
-                        onChange={importCSV}
-                      />
-                      <button 
-                        onClick={() => fileInputRef.current?.click()}
-                        className="bg-slate-100 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-slate-200"
-                        title="Importar CSV"
-                      >
-                        <Upload className="w-4 h-4"/>
-                      </button>
-                      <button 
-                        onClick={exportCSV}
-                        className="bg-slate-100 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-slate-200"
-                        title="Exportar CSV"
-                      >
-                        <Download className="w-4 h-4"/>
-                      </button>
-                      <button 
-                        onClick={() => setEditingEvent({ title: '', roomId: rooms[0]?.id || '', type: 'Plenaria', startTime: '2026-05-20T08:00', endTime: '2026-05-20T09:00', speakers: [], registeredCount: 0 })}
-                        className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-emerald-700 ml-2"
-                      >
-                        <Plus className="w-4 h-4"/> Charla
-                      </button>
-                    </div>
+          <main className="flex-1 overflow-y-auto p-6 md:p-8">
+             <div className="max-w-7xl mx-auto">
+                 {viewMode === 'MyAgenda' && bookmarks.size === 0 ? (
+                  <div className="h-64 flex flex-col items-center justify-center text-slate-400 bg-white rounded-3xl border-2 border-dashed border-slate-200 shadow-sm">
+                    <Bookmark className="w-12 h-12 mb-4 opacity-20" />
+                    <p className="font-bold uppercase tracking-widest text-xs">No tienes sesiones guardadas aún</p>
+                    <button onClick={() => setViewMode('All')} className="mt-4 text-blue-600 text-[10px] font-black uppercase hover:underline">Ir a la agenda general</button>
                   </div>
-                  <div className="grid grid-cols-1 gap-3">
-                    {events.map((event, i) => (
-                      <div key={i} className="bg-white p-4 border border-slate-200 rounded-xl flex items-center justify-between shadow-sm">
-                        <div className="flex-1 pr-4">
-                          <p className="font-bold text-sm text-slate-800 leading-tight">{event.title}</p>
-                          <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-1">
-                            {rooms.find(r => r.id === event.roomId)?.name || 'Subevento Borrado'} • {event.startTime.split('T')[1]}
-                          </p>
-                        </div>
-                        <div className="flex gap-2 shrink-0">
-                          <button onClick={() => setEditingEvent(event)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit className="w-4 h-4"/></button>
-                          <button onClick={() => deleteEvent(event.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4"/></button>
-                        </div>
-                      </div>
-                    ))}
+                ) : Object.keys(groupedEvents).length === 0 ? (
+                  <div className="h-64 flex flex-col items-center justify-center text-slate-400">
+                    <Calendar className="w-12 h-12 mb-4 opacity-20" />
+                    <p className="font-bold uppercase tracking-widest text-xs">No se encontraron sesiones</p>
+                    <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-widest">Prueba ajustando los filtros o la búsqueda</p>
                   </div>
-                </>
-              ) : (
-                <div className="bg-white p-6 border border-slate-200 rounded-xl shadow-sm space-y-4">
-                  <h3 className="font-bold text-slate-800 border-b pb-2">{editingEvent.id ? 'Editar Charla' : 'Crear Charla'}</h3>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Título de la Charla</label>
-                      <input type="text" className="w-full border rounded p-2 text-sm" value={editingEvent.title || ''} onChange={e => setEditingEvent({...editingEvent, title: e.target.value})} />
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Subevento (Sala)</label>
-                        <select className="w-full border rounded p-2 text-sm bg-white" value={editingEvent.roomId || ''} onChange={e => setEditingEvent({...editingEvent, roomId: e.target.value})}>
-                          {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Tipo de Sesión</label>
-                        <select className="w-full border rounded p-2 text-sm bg-white" value={editingEvent.type || 'Sesión plenaria'} onChange={e => setEditingEvent({...editingEvent, type: e.target.value as EventType})}>
-                          <option value="Sesión plenaria">Sesión plenaria</option>
-                          <option value="Sesión paralela y temática">Sesión paralela y temática</option>
-                          <option value="Escenario en vivo">Escenario en vivo</option>
-                          <option value="Laboratorio de aprendizaje">Laboratorio de aprendizaje</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Hora Inicio</label>
-                        <input type="datetime-local" className="w-full border rounded p-2 text-sm" value={editingEvent.startTime || ''} onChange={e => setEditingEvent({...editingEvent, startTime: e.target.value})} />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Hora Fin</label>
-                        <input type="datetime-local" className="w-full border rounded p-2 text-sm" value={editingEvent.endTime || ''} onChange={e => setEditingEvent({...editingEvent, endTime: e.target.value})} />
-                      </div>
-                      <div>
-                         <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1"># Inscritos Actuales</label>
-                         <input type="number" className="w-full border rounded p-2 text-sm" value={editingEvent.registeredCount || 0} onChange={e => setEditingEvent({...editingEvent, registeredCount: parseInt(e.target.value)})} />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Organizadores (sep. por coma)</label>
-                        <input type="text" className="w-full border rounded p-2 text-sm" value={editingEvent.organizers?.join(', ') || ''} onChange={e => setEditingEvent({...editingEvent, organizers: e.target.value.split(',').map(s=>s.trim()).filter(Boolean)})} />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Moderadores (sep. por coma)</label>
-                        <input type="text" className="w-full border rounded p-2 text-sm" value={editingEvent.moderators?.join(', ') || ''} onChange={e => setEditingEvent({...editingEvent, moderators: e.target.value.split(',').map(s=>s.trim()).filter(Boolean)})} />
-                      </div>
-                    </div>
-
-                    <div className="border border-slate-200 rounded p-4 bg-slate-50 relative mt-4">
-                      {/* ... existing speaker editor ... */}
-                      <div className="flex justify-between items-center mb-2">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block">Ponentes</label>
-                        <button 
-                          onClick={() => setEditingEvent({...editingEvent, speakers: [...(editingEvent.speakers || []), { id: `s-${Date.now()}`, name: '', role: '', bio: '', photoUrl: '' }]})}
-                          className="text-[10px] font-bold bg-white border border-slate-200 px-2 py-0.5 rounded text-blue-600 hover:bg-blue-50"
-                        >
-                          + Añadir
-                        </button>
-                      </div>
-                      <div className="space-y-3">
-                        {(editingEvent.speakers || []).map((speaker, idx) => (
-                           <div key={speaker.id} className="bg-white p-3 border border-slate-200 rounded relative shadow-sm">
-                              <button 
-                                onClick={() => setEditingEvent({...editingEvent, speakers: (editingEvent.speakers || []).filter((_, i) => i !== idx)})}
-                                className="absolute top-2 right-2 text-slate-400 hover:text-red-500"
-                              ><Trash2 className="w-4 h-4"/></button>
-                              <div className="grid grid-cols-2 gap-2 pr-6 mb-2">
-                                <input type="text" placeholder="Nombre completo" className="border rounded px-2 py-1 text-xs w-full" value={speaker.name} onChange={e => {
-                                  const newArr = [...(editingEvent.speakers || [])];
-                                  newArr[idx] = { ...newArr[idx], name: e.target.value };
-                                  setEditingEvent({...editingEvent, speakers: newArr});
-                                }} />
-                                <input type="text" placeholder="Rol / Cargo" className="border rounded px-2 py-1 text-xs w-full" value={speaker.role} onChange={e => {
-                                  const newArr = [...(editingEvent.speakers || [])];
-                                  newArr[idx] = { ...newArr[idx], role: e.target.value };
-                                  setEditingEvent({...editingEvent, speakers: newArr});
-                                }} />
+                ) : (
+                  <div className="space-y-12 pb-20">
+                    {Object.entries(groupedEvents).map(([dayKey, timeGroups]) => (
+                      <div key={dayKey} className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        <div className="space-y-6">
+                          {Object.entries(timeGroups).sort().map(([time, events]) => (
+                            <div key={time} className="grid grid-cols-1 lg:grid-cols-[120px_1fr] gap-4 md:gap-8 border-b border-slate-200 pb-8 last:border-0 relative z-10">
+                              {/* Time Block Column */}
+                              <div className="lg:sticky lg:top-8 self-start">
+                                <div className="bg-slate-800 text-white border border-slate-700 px-4 py-3 rounded-xl inline-block lg:block text-center shadow-md">
+                                  <span className="text-lg font-black tracking-tighter">
+                                    {formatTime(time)}
+                                  </span>
+                                </div>
                               </div>
-                              <input type="text" placeholder="URL Foto" className="border rounded px-2 py-1 text-xs w-full mb-2" value={speaker.photoUrl} onChange={e => {
-                                  const newArr = [...(editingEvent.speakers || [])];
-                                  newArr[idx] = { ...newArr[idx], photoUrl: e.target.value };
-                                  setEditingEvent({...editingEvent, speakers: newArr});
-                                }} />
-                              <textarea placeholder="Bibliografía" className="border rounded px-2 py-1 text-xs w-full" rows={2} value={speaker.bio} onChange={e => {
-                                  const newArr = [...(editingEvent.speakers || [])];
-                                  newArr[idx] = { ...newArr[idx], bio: e.target.value };
-                                  setEditingEvent({...editingEvent, speakers: newArr});
-                                }} />
-                           </div>
-                        ))}
-                      </div>
-                    </div>
-                    
-                    <div className="pt-2 space-y-3">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Nota Conceptual</label>
-                        <textarea className="w-full border rounded p-2 text-sm" rows={3} value={editingEvent.description || ''} onChange={e => setEditingEvent({...editingEvent, description: e.target.value})} />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Resumen</label>
-                        <textarea className="w-full border rounded p-2 text-sm" rows={3} value={editingEvent.summary || ''} onChange={e => setEditingEvent({...editingEvent, summary: e.target.value})} />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Objetivo</label>
-                        <textarea className="w-full border rounded p-2 text-sm" rows={2} value={editingEvent.objective || ''} onChange={e => setEditingEvent({...editingEvent, objective: e.target.value})} />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex justify-end gap-2 pt-4">
-                    <button onClick={() => setEditingEvent(null)} className="px-4 py-2 text-slate-600 text-sm font-medium hover:bg-slate-100 rounded">Cancelar</button>
-                    <button onClick={saveEvent} className="px-4 py-2 bg-slate-900 text-white text-sm font-bold flex items-center gap-2 rounded hover:bg-slate-800"><Save className="w-4 h-4"/> Guardar</button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
+                              {/* Sessions Cards Grid */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                                {events.map(event => (
+                                  <AgendaCard
+                                    key={event.id}
+                                    event={event}
+                                    room={rooms.find(r => r.id === event.roomId)}
+                                    isBookmarked={bookmarks.has(event.id)}
+                                    onToggleBookmark={toggleBookmark}
+                                    onClickRoom={handleRoomClick}
+                                    onClickCard={() => handleCardClick(event)}
+                                  />
+                                ))}
+                              </div>
+
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+             </div>
+          </main>
         </div>
       </div>
+    </div>
+
+    <RoomModal 
+        room={activeRoomModal} 
+        onClose={() => setActiveRoomModal(null)}
+        onFilterByRoom={(roomId) => {
+          setSelectedRoom(roomId);
+          setActiveRoomModal(null);
+        }}
+      />
+
+      <EventModal
+        event={activeEventModal}
+        room={activeEventModal ? rooms.find(r => r.id === activeEventModal.roomId) : undefined}
+        isBookmarked={activeEventModal ? bookmarks.has(activeEventModal.id) : false}
+        isRegistered={activeEventModal ? registrations.has(activeEventModal.id) : false}
+        onClose={() => setActiveEventModal(null)}
+        onToggleBookmark={toggleBookmark}
+        onRoomClick={handleRoomClick}
+        onRegister={activeEventModal ? () => registerForEvent(activeEventModal.id) : () => {}}
+        onCancelRegistration={activeEventModal ? () => cancelRegistration(activeEventModal.id) : () => {}}
+      />
+
+      {activeAdminEventModal && (
+        <AdminEventDetailsModal
+          event={activeAdminEventModal}
+          room={rooms.find(r => r.id === activeAdminEventModal.roomId)}
+          onClose={() => setActiveAdminEventModal(null)}
+        />
+      )}
+
+      {isAdminOpen && (
+        <AdminPanel 
+          rooms={rooms}
+          setRooms={setRooms}
+          events={events}
+          setEvents={setEventsData}
+          onClose={() => setIsAdminOpen(false)}
+          onEventClick={(event) => setActiveAdminEventModal(event)}
+        />
+      )}
+
+      {isQRHubOpen && (
+        <QRControlPanel 
+          rooms={rooms}
+          initialTab={qrHubInitialTab}
+          onClose={() => setIsQRHubOpen(false)}
+        />
+      )}
     </div>
   );
 }
