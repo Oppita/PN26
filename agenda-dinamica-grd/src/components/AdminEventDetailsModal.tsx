@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AgendaEvent, Room } from '../data/agenda';
 import { X, Users, Mail, Phone, Download, Clock, MapPin, Tag } from 'lucide-react';
 import { getSupabase } from '../lib/supabaseClient';
+import { formatTime } from '../lib/utils';
 
 interface Props {
   event: AgendaEvent;
@@ -48,12 +49,6 @@ export function AdminEventDetailsModal({ event, room, onClose }: Props) {
     };
     fetchUsers();
   }, [event.id]);
-
-  const formatTime = (t?: string) => {
-    if (!t) return '—';
-    const date = new Date(t);
-    return date.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', hour12: false });
-  };
 
   const exportCSV = () => {
     const headers = ['Nombre', 'Email', 'Teléfono', 'Organización'];
@@ -173,7 +168,12 @@ export function AdminEventDetailsModal({ event, room, onClose }: Props) {
                   <div key={index} className="flex flex-col sm:flex-row gap-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
                     <div className="w-16 h-16 rounded-xl overflow-hidden shrink-0 border-2 border-slate-200 bg-slate-200 flex items-center justify-center">
                       {speaker.photoUrl ? (
-                        <img src={speaker.photoUrl} alt={speaker.name} className="w-full h-full object-cover" />
+                        <img 
+                          src={speaker.photoUrl} 
+                          alt={speaker.name} 
+                          className="w-full h-full object-cover" 
+                          referrerPolicy="no-referrer"
+                        />
                       ) : (
                         <span className="text-2xl font-black text-slate-400">{speaker.name.charAt(0)}</span>
                       )}
