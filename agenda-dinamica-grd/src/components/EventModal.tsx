@@ -219,7 +219,12 @@ export function EventModal({ event, room, isBookmarked, isRegistered, onClose, o
                    {event.speakers.map((speaker, index) => (
                       <div key={index} className="flex flex-col sm:flex-row gap-5">
                          <div className="w-24 h-24 rounded-2xl overflow-hidden shrink-0 border-4 border-slate-100 shadow-inner">
-                            <img src={speaker.photoUrl || 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=100&h=100&fit=crop'} alt={speaker.name} className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all duration-500" />
+                            <img 
+                              src={speaker.photoUrl || 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=100&h=100&fit=crop'} 
+                              alt={speaker.name} 
+                              className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all duration-500"
+                              referrerPolicy="no-referrer"
+                            />
                          </div>
                          <div>
                             <p className="font-black text-lg text-slate-900 leading-none mb-1">{speaker.name}</p>
