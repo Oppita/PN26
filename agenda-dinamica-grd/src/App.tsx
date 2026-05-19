@@ -58,6 +58,9 @@ function MainApp() {
     supabaseLog,
     clearLocalCache,
     deleteEvent,
+    saveEvent,
+    saveRoom,
+    deleteRoom,
   } = useAgendaData();
 
   const [activeRoomModal, setActiveRoomModal] = useState<Room | null>(null);
@@ -322,6 +325,9 @@ function MainApp() {
             onEventClick={(event) => setActiveAdminEventModal(event)}
             syncData={syncData}
             deleteEvent={deleteEvent}
+            saveEvent={saveEvent}
+            saveRoom={saveRoom}
+            deleteRoom={deleteRoom}
             supabaseLog={supabaseLog}
             clearLocalCache={clearLocalCache}
           />
