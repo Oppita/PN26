@@ -148,6 +148,113 @@ export function useAgendaData() {
     }
   };
 
+  const saveRoom = async (room: Room) => {
+    const prevRooms = [...rooms];
+    const isNew = !rooms.find(r => r.id === room.id) || room.id === 'new';
+    const finalRoom = { ...room };
+    if (isNew && room.id === 'new') {
+      finalRoom.id = room.name.toLowerCase().replace(/\s+/g, '-');
+    }
+
+    // 1. Local Persistence First
+    const updatedRooms = isNew 
+      ? [...rooms, finalRoom] 
+      : rooms.map(r => r.id === finalRoom.id ? finalRoom : r);
+    
+    setRooms(updatedRooms);
+    localStorage.setItem('agenda-rooms-v3', JSON.stringify(updatedRooms));
+    
+    const toastId = toast.loading(isNew ? "Creando sala..." : "Actualizando sala...");
+
+    try {
+      const supabase = getSupabase();
+      // TABLA 'rooms'
+      const { error } = isNew 
+        ? await supabase.from('rooms').insert([finalRoom])
+        : await supabase.from('rooms').update(finalRoom).eq('id', finalRoom.id);
+      
+      if (error) throw error;
+      
+      toast.success(isNew ? "Sala creada" : "Sala actualizada", { id: toastId });
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await syncData();
+    } catch (err: any) {
+      setRooms(prevRooms);
+      toast.error(`Error: ${err.message}`, { id: toastId });
+    }
+  };
+
+  const deleteRoom = async (id: string) => {
+    const prevRooms = [...rooms];
+    const updatedRooms = rooms.filter(r => r.id !== id);
+    setRooms(updatedRooms);
+    localStorage.setItem('agenda-rooms-v3', JSON.stringify(updatedRooms));
+
+    const toastId = toast.loading("Eliminando sala...");
+    try {
+      const supabase = getSupabase();
+      // TABLA 'rooms'
+      const { error } = await supabase.from('rooms').delete().eq('id', id);
+      if (error) throw error;
+      toast.success("Sala eliminada", { id: toastId });
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await syncData();
+    } catch (err: any) {
+      setRooms(prevRooms);
+      toast.error(`Error: ${err.message}`, { id: toastId });
+    }
+  };
+
+  const saveEvent = async (event: AgendaEvent) => {
+    const prevEvents = [...eventsData];
+    const isNew = !eventsData.find(e => e.id === event.id);
+    
+    // 1. Local Persistence First
+    const updatedEvents = isNew 
+      ? [...eventsData, event] 
+      : eventsData.map(e => e.id === event.id ? event : e);
+    
+    setEventsData(updatedEvents);
+    localStorage.setItem('agenda-events-v3', JSON.stringify(updatedEvents));
+    
+    const toastId = toast.loading(isNew ? "Creando charla..." : "Actualizando charla...");
+
+    try {
+      const supabase = getSupabase();
+      const payload = {
+        id: event.id,
+        title: event.title,
+        description: event.description || '',
+        start_time: event.startTime,
+        end_time: event.endTime,
+        room_id: event.roomId,
+        type: event.type,
+        theme_tag: event.themeTag || '',
+        speakers: event.speakers || [],
+        registered_count: event.registeredCount || 0,
+        capacity: event.capacity || 100,
+        organizers: event.organizers || [],
+        moderators: event.moderators || [],
+        summary: event.summary || '',
+        objective: event.objective || ''
+      };
+
+      // TABLA 'talks'
+      const { error } = isNew 
+        ? await supabase.from('talks').insert([payload])
+        : await supabase.from('talks').update(payload).eq('id', event.id);
+      
+      if (error) throw error;
+      
+      toast.success(isNew ? "Charla creada" : "Charla actualizada", { id: toastId });
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await syncData();
+    } catch (err: any) {
+      setEventsData(prevEvents);
+      toast.error(`Error: ${err.message}`, { id: toastId });
+    }
+  };
+
   const deleteEvent = async (id: string) => {
     const prevEvents = [...eventsData];
     
@@ -164,7 +271,7 @@ export function useAgendaData() {
       // 2. Limpiar dependencias (registros)
       await supabase.from('registration').delete().eq('talk_id', id);
 
-      // 3. Borrar en la DB principal
+      // 3. Borrar en la DB principal (TABLA 'talks')
       const { error } = await supabase.from('talks').delete().eq('id', id);
       
       if (error) throw error;
@@ -311,5 +418,8 @@ export function useAgendaData() {
     supabaseLog,
     clearLocalCache,
     deleteEvent,
+    saveEvent,
+    saveRoom,
+    deleteRoom,
   };
 }
