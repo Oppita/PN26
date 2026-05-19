@@ -92,13 +92,13 @@ function MainApp() {
     <div className="h-screen flex flex-col overflow-hidden text-slate-800 bg-slate-50">
       <Toaster position="top-right" richColors />
       {/* Header */}
-      <header className="h-auto min-h-16 py-3 lg:py-0 lg:h-16 bg-slate-900 text-white flex flex-col lg:flex-row items-center justify-between px-6 shrink-0 z-40 gap-4 lg:gap-0">
+      <header className="h-auto min-h-16 py-3 lg:py-0 lg:h-16 bg-white border-b border-slate-250 text-slate-800 flex flex-col lg:flex-row items-center justify-between px-6 shrink-0 z-40 gap-3 lg:gap-0 shadow-sm">
         <div className="flex items-center gap-4 w-full lg:w-auto overflow-x-auto scrollbar-hide pb-1 lg:pb-0">
-          <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center font-black text-xl italic uppercase shrink-0">P</div>
+          <div className="w-10 h-10 bg-emerald-600 text-white rounded-lg flex items-center justify-center font-black text-xl italic uppercase shrink-0">P</div>
           <div className="flex items-center gap-4 shrink-0">
             <div>
-              <h1 className="text-xl font-black tracking-tight leading-none uppercase">PN26</h1>
-              <p className="text-[10px] text-slate-400 font-bold tracking-widest mt-1 uppercase hidden sm:block">Plataforma de Navegación</p>
+              <h1 className="text-xl font-black tracking-tight leading-none uppercase text-emerald-800">PN26</h1>
+              <p className="text-[10px] text-slate-500 font-bold tracking-widest mt-1 uppercase hidden sm:block">Plataforma de Navegación</p>
             </div>
             
             {/* Sync Indicator */}
@@ -106,14 +106,14 @@ function MainApp() {
               <button 
                 onClick={syncData}
                 title={`Forzar Sincronización. Última act: ${lastSynced ? lastSynced.toLocaleTimeString() : 'N/A'}`}
-                className="ml-2 sm:ml-4 flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded border border-slate-700 transition"
+                className="ml-2 sm:ml-4 flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-200 text-slate-700 transition"
               >
-                {syncStatus === 'syncing' && <RefreshCw className="w-3.5 h-3.5 text-blue-400 animate-spin" />}
-                {syncStatus === 'success' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />}
-                {syncStatus === 'error' && <CloudOff className="w-3.5 h-3.5 text-red-400" />}
+                {syncStatus === 'syncing' && <RefreshCw className="w-3.5 h-3.5 text-emerald-500 animate-spin" />}
+                {syncStatus === 'success' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
+                {syncStatus === 'error' && <CloudOff className="w-3.5 h-3.5 text-red-500" />}
                 {syncStatus === 'idle' && <Cloud className="w-3.5 h-3.5 text-slate-400" />}
                 
-                <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wider hidden md:inline-block">
+                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider hidden md:inline-block">
                   {syncStatus === 'syncing' 
                     ? 'Sincronizando...' 
                     : syncStatus === 'success' 
@@ -130,25 +130,25 @@ function MainApp() {
           {isAdmin && (
             <>
               <button 
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-indigo-500 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-white shadow-lg shrink-0"
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-emerald-500 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-white shadow-md shrink-0"
                 onClick={() => openQRHub('DIRECTORY')}
               >
                 <Users className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Directorio</span>
               </button>
               <button 
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-blue-500 bg-blue-600 hover:bg-blue-500 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-white shadow-lg shrink-0"
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-teal-500 bg-teal-600 hover:bg-teal-500 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-white shadow-md shrink-0"
                 onClick={() => openQRHub('ROOM')}
               >
                 <QrCode className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Escáner</span>
               </button>
               <button 
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-700 bg-slate-800 hover:bg-slate-700 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest shrink-0"
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 bg-slate-100 hover:bg-slate-200 text-slate-750 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest shrink-0"
                 onClick={() => setIsAdminOpen(true)}
               >
                 <Settings className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Config</span>
               </button>
               <button 
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-red-900 bg-red-950 hover:bg-red-900 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-red-200 shrink-0"
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-red-200 bg-red-50 hover:bg-red-100 rounded-lg text-[10px] font-black transition-colors uppercase tracking-widest text-red-700 shrink-0"
                 onClick={() => signOut()}
                 title="Salir del modo administrador"
               >
@@ -220,7 +220,7 @@ function MainApp() {
                     onClick={() => setViewMode('MyAgenda')}
                     className={classNames(
                       "px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap border",
-                      viewMode === 'MyAgenda' ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                      viewMode === 'MyAgenda' ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                     )}
                   >
                     <Bookmark className="w-3.5 h-3.5" /> MIS SESIONES ({bookmarks.size})
@@ -251,7 +251,7 @@ function MainApp() {
                             <div key={time} className="grid grid-cols-1 lg:grid-cols-[120px_1fr] gap-4 md:gap-8 border-b border-slate-200 pb-8 last:border-0 relative z-10">
                               {/* Time Block Column */}
                               <div className="lg:sticky lg:top-8 self-start">
-                                <div className="bg-slate-800 text-white border border-slate-700 px-4 py-3 rounded-xl inline-block lg:block text-center shadow-md">
+                                <div className="bg-emerald-50 text-emerald-800 border-2 border-emerald-200/50 px-4 py-3 rounded-2xl inline-block lg:block text-center shadow-sm">
                                   <span className="text-lg font-black tracking-tighter">
                                     {formatTime(time)}
                                   </span>
