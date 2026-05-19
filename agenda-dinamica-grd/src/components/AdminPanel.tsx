@@ -430,11 +430,21 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
                     <div className="grid grid-cols-3 gap-3">
                       <div>
                         <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Hora Inicio</label>
-                        <input type="datetime-local" className="w-full border rounded p-2 text-sm" value={editingEvent.startTime || ''} onChange={e => setEditingEvent({...editingEvent, startTime: e.target.value})} />
+                        <input 
+                          type="datetime-local" 
+                          className="w-full border rounded p-2 text-sm" 
+                          value={editingEvent.startTime ? editingEvent.startTime.slice(0, 16) : ''} 
+                          onChange={e => setEditingEvent({...editingEvent, startTime: e.target.value})} 
+                        />
                       </div>
                       <div>
                         <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Hora Fin</label>
-                        <input type="datetime-local" className="w-full border rounded p-2 text-sm" value={editingEvent.endTime || ''} onChange={e => setEditingEvent({...editingEvent, endTime: e.target.value})} />
+                        <input 
+                          type="datetime-local" 
+                          className="w-full border rounded p-2 text-sm" 
+                          value={editingEvent.endTime ? editingEvent.endTime.slice(0, 16) : ''} 
+                          onChange={e => setEditingEvent({...editingEvent, endTime: e.target.value})} 
+                        />
                       </div>
                       <div>
                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1"># Inscritos Actuales</label>
@@ -471,23 +481,44 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
                                 onClick={() => setEditingEvent({...editingEvent, speakers: (editingEvent.speakers || []).filter((_, i) => i !== idx)})}
                                 className="absolute top-2 right-2 text-slate-400 hover:text-red-500"
                               ><Trash2 className="w-4 h-4"/></button>
-                              <div className="grid grid-cols-2 gap-2 pr-6 mb-2">
-                                <input type="text" placeholder="Nombre completo" className="border rounded px-2 py-1 text-xs w-full" value={speaker.name} onChange={e => {
-                                  const newArr = [...(editingEvent.speakers || [])];
-                                  newArr[idx] = { ...newArr[idx], name: e.target.value };
-                                  setEditingEvent({...editingEvent, speakers: newArr});
-                                }} />
-                                <input type="text" placeholder="Rol / Cargo" className="border rounded px-2 py-1 text-xs w-full" value={speaker.role} onChange={e => {
-                                  const newArr = [...(editingEvent.speakers || [])];
-                                  newArr[idx] = { ...newArr[idx], role: e.target.value };
-                                  setEditingEvent({...editingEvent, speakers: newArr});
-                                }} />
+                              <div className="flex gap-3 mb-2">
+                                <div className="w-16 h-16 shrink-0">
+                                  {speaker.photoUrl ? (
+                                    <img 
+                                      src={speaker.photoUrl} 
+                                      alt="" 
+                                      className="w-full h-full object-cover rounded-lg bg-slate-100 border shadow-inner"
+                                      referrerPolicy="no-referrer"
+                                      onError={(e) => {
+                                        (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=100&h=100&fit=crop';
+                                      }}
+                                    />
+                                  ) : (
+                                    <div className="w-full h-full bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 border border-dashed border-slate-300">
+                                      <Users className="w-6 h-6" />
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex-1 space-y-2">
+                                  <div className="grid grid-cols-2 gap-2 pr-6">
+                                    <input type="text" placeholder="Nombre completo" className="border rounded px-2 py-1 text-xs w-full" value={speaker.name} onChange={e => {
+                                      const newArr = [...(editingEvent.speakers || [])];
+                                      newArr[idx] = { ...newArr[idx], name: e.target.value };
+                                      setEditingEvent({...editingEvent, speakers: newArr});
+                                    }} />
+                                    <input type="text" placeholder="Rol / Cargo" className="border rounded px-2 py-1 text-xs w-full" value={speaker.role} onChange={e => {
+                                      const newArr = [...(editingEvent.speakers || [])];
+                                      newArr[idx] = { ...newArr[idx], role: e.target.value };
+                                      setEditingEvent({...editingEvent, speakers: newArr});
+                                    }} />
+                                  </div>
+                                  <input type="text" placeholder="URL Foto" className="border rounded px-2 py-1 text-xs w-full" value={speaker.photoUrl} onChange={e => {
+                                      const newArr = [...(editingEvent.speakers || [])];
+                                      newArr[idx] = { ...newArr[idx], photoUrl: e.target.value };
+                                      setEditingEvent({...editingEvent, speakers: newArr});
+                                    }} />
+                                </div>
                               </div>
-                              <input type="text" placeholder="URL Foto" className="border rounded px-2 py-1 text-xs w-full mb-2" value={speaker.photoUrl} onChange={e => {
-                                  const newArr = [...(editingEvent.speakers || [])];
-                                  newArr[idx] = { ...newArr[idx], photoUrl: e.target.value };
-                                  setEditingEvent({...editingEvent, speakers: newArr});
-                                }} />
                               <textarea placeholder="Bibliografía" className="border rounded px-2 py-1 text-xs w-full" rows={2} value={speaker.bio} onChange={e => {
                                   const newArr = [...(editingEvent.speakers || [])];
                                   newArr[idx] = { ...newArr[idx], bio: e.target.value };
