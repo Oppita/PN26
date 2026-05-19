@@ -228,7 +228,12 @@ export function DirectoryDashboard({ logs, rooms }: DirectoryDashboardProps) {
                             <div className="flex justify-between items-start mb-4">
                                <div className="flex items-center gap-3">
                                   {attendee.photoUrl ? (
-                                    <img src={attendee.photoUrl} alt={attendee.name} className="w-12 h-12 rounded-full object-cover border-2 border-slate-100" />
+                                    <img 
+                                      src={attendee.photoUrl} 
+                                      alt={attendee.name} 
+                                      className="w-12 h-12 rounded-full object-cover border-2 border-slate-100" 
+                                      referrerPolicy="no-referrer"
+                                    />
                                   ) : (
                                     <div className={classNames(
                                        "w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg border-2",
