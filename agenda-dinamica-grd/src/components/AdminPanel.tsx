@@ -16,11 +16,14 @@ interface AdminPanelProps {
   onEventClick?: (event: AgendaEvent) => void;
   syncData: () => Promise<void>;
   deleteEvent: (id: string) => Promise<void>;
+  saveEvent: (event: AgendaEvent) => Promise<void>;
+  saveRoom: (room: Room) => Promise<void>;
+  deleteRoom: (id: string) => Promise<void>;
   clearLocalCache?: () => void;
   supabaseLog?: { rooms: number, events: number, status: string };
 }
 
-export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEventClick, syncData, deleteEvent, supabaseLog, clearLocalCache }: AdminPanelProps) {
+export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEventClick, syncData, deleteEvent, saveEvent, saveRoom, deleteRoom, supabaseLog, clearLocalCache }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<'rooms' | 'events' | 'logs'>('rooms');
   const { logs } = useQRControl();
   const { attendees } = useAttendees();
@@ -46,7 +49,7 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
     }
   };
 
-  const deleteRoom = async (id: string) => {
+  const handleDeleteRoom = async (id: string) => {
     if (isDeleting === id) {
       setIsDeleting(null);
       
@@ -57,21 +60,7 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
         return;
       }
 
-      const prevRooms = [...rooms];
-      setRooms(prev => prev.filter(r => r.id !== id));
-      
-      try {
-        const supabase = getSupabase();
-        const { error } = await supabase.from('rooms').delete().eq('id', id);
-        if (error) throw error;
-        
-        toast.success("Sala eliminada");
-        await syncData();
-      } catch (err: any) {
-        console.error("Delete Room Error:", err);
-        setRooms(prevRooms);
-        toast.error(`Error: ${err.message}`);
-      }
+      await deleteRoom(id);
     } else {
       setIsDeleting(id);
       setTimeout(() => {
@@ -80,103 +69,24 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
     }
   };
 
-  const saveRoom = async () => {
+  const handleSaveRoom = async () => {
     if (!editingRoom?.name || !editingRoom?.id) return;
-    
-    // Check if new or edit
-    const exists = rooms.some(r => r.id === editingRoom.id);
-    const id = editingRoom.id === 'new' ? editingRoom.name.toLowerCase().replace(/\s+/g, '-') : editingRoom.id;
+    const isNew = editingRoom.id === 'new';
+    const id = isNew ? editingRoom.name.toLowerCase().replace(/\s+/g, '-') : editingRoom.id;
     const roomPayload = { ...editingRoom, id } as Room;
 
-    const prevRooms = [...rooms];
-    if (exists && editingRoom.id !== 'new') {
-      setRooms(rooms.map(r => r.id === editingRoom.id ? roomPayload : r));
-    } else {
-      setRooms([...rooms, roomPayload]);
-    }
     setEditingRoom(null);
-
-    try {
-      const supabase = getSupabase();
-      if (exists && editingRoom.id !== 'new') {
-        const { error } = await supabase.from('rooms').update(roomPayload).eq('id', id);
-        if (error) {
-          console.error('Supabase update room error:', error);
-          toast.error("Error al actualizar la sala");
-        } else {
-          toast.success("Sala actualizada");
-        }
-      } else {
-        const { error } = await supabase.from('rooms').insert([roomPayload]);
-        if (error) {
-          console.error('Supabase insert room error:', error);
-          toast.error("Error al crear la sala");
-        } else {
-          toast.success("Sala creada correctamente");
-        }
-      }
-      await syncData();
-    } catch(err) {
-      setRooms(prevRooms);
-      console.error('saveRoom Exception:', err);
-      toast.error("Hubo un error guardando la sala");
-    }
+    await saveRoom(roomPayload);
   };
 
-  const saveEvent = async () => {
+  const handleSaveEvent = async () => {
     if (!editingEvent?.title || !editingEvent?.roomId) return;
     const isEditing = !!editingEvent.id;
     const id = isEditing ? editingEvent.id! : `evt-${Date.now()}`;
-    const newEvent = { ...editingEvent, id, speakers: editingEvent.speakers || [] } as AgendaEvent;
+    const eventPayload = { ...editingEvent, id, speakers: editingEvent.speakers || [] } as AgendaEvent;
     
-    // Optimistic Update
-    setEvents(events.map(e => e.id === editingEvent.id ? newEvent : e));
-    if (!isEditing) setEvents([...events, newEvent]);
     setEditingEvent(null);
-
-    // Supabase Sync
-    try {
-      const supabase = getSupabase();
-      const payload = {
-        id: newEvent.id,
-        title: newEvent.title,
-        description: newEvent.description,
-        start_time: newEvent.startTime,
-        end_time: newEvent.endTime,
-        room_id: newEvent.roomId,
-        type: newEvent.type,
-        theme_tag: newEvent.themeTag,
-        speakers: newEvent.speakers,
-        registered_count: newEvent.registeredCount || 0,
-        capacity: newEvent.capacity || 100,
-        organizers: newEvent.organizers || [],
-        moderators: newEvent.moderators || [],
-        summary: newEvent.summary || '',
-        objective: newEvent.objective || ''
-      };
-      
-      if (isEditing) {
-        const { error } = await supabase.from('talks').update(payload).eq('id', id);
-        if (error) {
-          console.error('Supabase update talk error:', error, payload);
-          toast.error("Error al actualizar la charla");
-        } else {
-          toast.success("Charla actualizada exitosamente");
-        }
-      } else {
-        const { error } = await supabase.from('talks').insert([payload]);
-        if (error) {
-          console.error('Supabase insert talk error:', error, payload);
-          toast.error("Error al crear la charla");
-        } else {
-          toast.success("Nueva charla guardada exitosamente");
-        }
-      }
-      await syncData();
-    } catch(err) {
-      console.error('saveEvent Exception:', err);
-      toast.error("Hubo un error guardando la información");
-    }
+    await saveEvent(eventPayload);
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -366,7 +276,7 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
                         <div className="flex gap-2">
                           <button onClick={() => setEditingRoom(room)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Editar"><Edit className="w-4 h-4"/></button>
                           <button 
-                            onClick={(e) => { e.stopPropagation(); deleteRoom(room.id); }} 
+                            onClick={(e) => { e.stopPropagation(); handleDeleteRoom(room.id); }} 
                             className={`p-1.5 rounded transition-all flex items-center gap-1.5 min-w-[32px] justify-center ${isDeleting === room.id ? 'bg-red-600 text-white px-3' : 'text-red-500 hover:bg-red-50'}`}
                             title={isDeleting === room.id ? "Confirmar eliminación" : "Eliminar sala"}
                           >
@@ -406,7 +316,7 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
                   </div>
                   <div className="flex justify-end gap-2 pt-4">
                     <button onClick={() => setEditingRoom(null)} className="px-4 py-2 text-slate-600 text-sm font-medium hover:bg-slate-100 rounded">Cancelar</button>
-                    <button onClick={saveRoom} className="px-4 py-2 bg-slate-900 text-white text-sm font-bold flex items-center gap-2 rounded hover:bg-slate-800"><Save className="w-4 h-4"/> Guardar</button>
+                    <button onClick={handleSaveRoom} className="px-4 py-2 bg-slate-900 text-white text-sm font-bold flex items-center gap-2 rounded hover:bg-slate-800"><Save className="w-4 h-4"/> Guardar</button>
                   </div>
                 </div>
               )}
@@ -605,7 +515,7 @@ export function AdminPanel({ rooms, setRooms, events, setEvents, onClose, onEven
                   </div>
                   <div className="flex justify-end gap-2 pt-4">
                     <button onClick={() => setEditingEvent(null)} className="px-4 py-2 text-slate-600 text-sm font-medium hover:bg-slate-100 rounded">Cancelar</button>
-                    <button onClick={saveEvent} className="px-4 py-2 bg-slate-900 text-white text-sm font-bold flex items-center gap-2 rounded hover:bg-slate-800"><Save className="w-4 h-4"/> Guardar</button>
+                    <button onClick={handleSaveEvent} className="px-4 py-2 bg-slate-900 text-white text-sm font-bold flex items-center gap-2 rounded hover:bg-slate-800"><Save className="w-4 h-4"/> Guardar</button>
                   </div>
                 </div>
               )}
