@@ -38,7 +38,7 @@ export function LoginPage() {
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="bg-white max-w-md w-full rounded-2xl shadow-xl border border-slate-100 p-8 space-y-8 animate-in fade-in zoom-in-95 duration-500">
         <div className="text-center">
-          <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center font-black text-3xl italic uppercase text-white mx-auto shadow-lg shadow-blue-600/30">
+          <div className="w-16 h-16 bg-emerald-600 rounded-2xl flex items-center justify-center font-black text-3xl italic uppercase text-white mx-auto shadow-lg shadow-emerald-500/20">
             P
           </div>
           <h1 className="mt-6 text-2xl font-black text-slate-800 tracking-tight uppercase">PN26</h1>
@@ -62,7 +62,7 @@ export function LoginPage() {
                 <input
                   type="email"
                   required
-                  className="w-full text-sm border border-slate-200 rounded-xl pl-10 pr-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50 transition-all font-medium"
+                  className="w-full text-sm border border-slate-200 rounded-xl pl-10 pr-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-slate-50 transition-all font-medium"
                   placeholder="tu@correo.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -80,7 +80,7 @@ export function LoginPage() {
                   type="password"
                   required
                   minLength={6}
-                  className="w-full text-sm border border-slate-200 rounded-xl pl-10 pr-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50 transition-all font-medium"
+                  className="w-full text-sm border border-slate-200 rounded-xl pl-10 pr-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-slate-50 transition-all font-medium"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -92,7 +92,7 @@ export function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 text-white font-black uppercase tracking-widest py-3.5 rounded-xl text-xs hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/30 flex justify-center items-center gap-2 group disabled:opacity-70 disabled:cursor-not-allowed"
+            className="w-full bg-emerald-600 text-white font-black uppercase tracking-widest py-3.5 rounded-xl text-xs hover:bg-emerald-750 transition-colors shadow-lg shadow-emerald-600/20 flex justify-center items-center gap-2 group disabled:opacity-70 disabled:cursor-not-allowed"
           >
             {loading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
