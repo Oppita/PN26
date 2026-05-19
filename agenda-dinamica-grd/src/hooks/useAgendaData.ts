@@ -1,318 +1,433 @@
-import React, { useState, useMemo } from 'react';
-import { X, Search, Plus, User, Building, Mail, Clock, Download, QrCode, CheckCircle2, TrendingUp, Users, Presentation, Coffee } from 'lucide-react';
-import QRCode from 'react-qr-code';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar, Legend } from 'recharts';
-import { useAttendees, Attendee } from '../hooks/useAttendees';
-import { QRScanLog } from '../hooks/useQRControl';
-import { Room } from '../data/agenda';
-import { classNames } from '../lib/utils';
+import { useState, useEffect, useMemo } from 'react';
+import { INITIAL_EVENTS, INITIAL_ROOMS, AgendaEvent, Room, EventType } from '../data/agenda';
+import { getSupabase } from '../lib/supabaseClient';
+import { useAuth } from '../context/AuthContext';
+import { toast } from 'sonner';
 
-const COLORS = ['#4f46e5', '#ec4899', '#06b6d4', '#f59e0b', '#10b981', '#6366f1'];
-
-interface DirectoryDashboardProps {
-  logs: QRScanLog[];
-  rooms: Room[];
-}
-
-export function DirectoryDashboard({ logs, rooms }: DirectoryDashboardProps) {
-  const { attendees, addAttendee, deleteAttendee } = useAttendees();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [viewingQrFor, setViewingQrFor] = useState<Attendee | null>(null);
-
-  // Compute metrics
-  const uniqueScannedIds = useMemo(() => new Set(logs.map(l => l.qrData)), [logs]);
-  const presentCount = uniqueScannedIds.size;
-  const totalRegistered = attendees.length;
-  const attendanceRate = totalRegistered > 0 ? Math.round((presentCount / totalRegistered) * 100) : 0;
-
-  // Chart: Access by Room
-  const roomAccessData = useMemo(() => {
-    const counts: Record<string, number> = {};
-    logs.filter(l => l.type === 'ROOM' && l.roomId).forEach(l => {
-      counts[l.roomId!] = (counts[l.roomId!] || 0) + 1;
-    });
-    return Object.entries(counts).map(([roomId, count]) => ({
-      name: rooms.find(r => r.id === roomId)?.name || 'Desconocida',
-      Acceso: count,
-    }));
-  }, [logs, rooms]);
-
-  // Chart: Scans over time (Hourly)
-  const timelineData = useMemo(() => {
-    const hourly: Record<string, number> = {};
-    logs.forEach(l => {
-      const hour = new Date(l.timestamp).getHours();
-      const label = `${hour}:00`;
-      hourly[label] = (hourly[label] || 0) + 1;
-    });
-    return Object.entries(hourly).map(([time, count]) => ({ time, Escaneos: count })).sort((a,b) => parseInt(a.time) - parseInt(b.time));
-  }, [logs]);
-
-  // Derived attendee list with scan status
-  const sortedAttendees = useMemo(() => {
-    const filtered = attendees.filter(a => 
-      a.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      a.organization.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      a.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      a.id.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-    // Sort: Recently scanned first
-    return filtered.sort((a, b) => {
-      const lastScanA = logs.find(l => l.qrData === a.id);
-      const lastScanB = logs.find(l => l.qrData === b.id);
-      if (lastScanA && !lastScanB) return -1;
-      if (!lastScanA && lastScanB) return 1;
-      if (lastScanA && lastScanB) {
-        return new Date(lastScanB.timestamp).getTime() - new Date(lastScanA.timestamp).getTime();
+export function useAgendaData() {
+  const { user } = useAuth();
+  const [bookmarks, setBookmarks] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('agenda-bookmarks-v3');
+      if (saved) return new Set(JSON.parse(saved));
+    } catch (e) {}
+    return new Set<string>();
+  });
+  
+  const [registrations, setRegistrations] = useState<Set<string>>(new Set());
+  const [rooms, setRooms] = useState<Room[]>(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('agenda-rooms-v3');
+        if (saved && saved !== '[]' && saved !== 'null') return JSON.parse(saved);
       }
-      return 0;
-    });
-  }, [attendees, logs, searchQuery]);
+    } catch(e) {}
+    return INITIAL_ROOMS;
+  });
+  
+  const [eventsData, setEventsData] = useState<AgendaEvent[]>(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('agenda-events-v3');
+        if (saved && saved !== '[]' && saved !== 'null') return JSON.parse(saved);
+      }
+    } catch(e) {}
+    return INITIAL_EVENTS;
+  });
+  
+  const [loadingInitial, setLoadingInitial] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const [lastSynced, setLastSynced] = useState<Date | null>(null);
+  const [supabaseLog, setSupabaseLog] = useState<{rooms: number, events: number, status: string}>({rooms: 0, events: 0, status: 'Esperando...'});
 
-  const handleExportCSV = () => {
-    let csv = "ID,Nombre,Organizacion,Rol,Email,Escaneos,Ultimo Escaneo\\n";
-    sortedAttendees.forEach(a => {
-      const scans = logs.filter(l => l.qrData === a.id);
-      const isPresent = scans.length > 0;
-      const latestScanTime = isPresent ? new Date(scans[0].timestamp).toLocaleString() : 'N/A';
-      csv += `${a.id},"${a.name}","${a.organization}","${a.role}","${a.email}",${scans.length},"${latestScanTime}"\n`;
-    });
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `directorio_reporte_${new Date().getTime()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const clearLocalCache = () => {
+    localStorage.removeItem('agenda-events-v3');
+    localStorage.removeItem('agenda-rooms-v3');
+    setEventsData([]);
+    setRooms([]);
+    toast.info("Caché local limpiada. Sincronizando...");
+    syncData();
   };
 
-  return (
-    <div className="flex-1 bg-slate-50 overflow-y-auto w-full relative">
-       <div className="max-w-7xl mx-auto p-6 md:p-12 min-h-full flex flex-col gap-8">
+  // Sync to local storage on changes
+  useEffect(() => {
+    localStorage.setItem('agenda-bookmarks-v3', JSON.stringify(Array.from(bookmarks)));
+  }, [bookmarks]);
+
+  useEffect(() => {
+    localStorage.setItem('agenda-rooms-v3', JSON.stringify(rooms));
+  }, [rooms]);
+
+  useEffect(() => {
+    localStorage.setItem('agenda-events-v3', JSON.stringify(eventsData));
+  }, [eventsData]);
+
+  const syncData = async () => {
+    setSyncStatus('syncing');
+    console.log('--- SUPABASE SYNC START ---');
+    try {
+      const supabase = getSupabase();
+      
+      // Fetch registrations
+      if (user) {
+        console.log('Fetching registrations for user:', user.id);
+        const { data: regData, error: regError } = await supabase
+          .from('registration')
+          .select('talk_id')
+          .eq('user_id', user.id);
           
-          {/* Dashboard Header */}
-          <div className="flex flex-col md:flex-row justify-between md:items-end gap-6 border-b border-slate-200 pb-6">
-             <div>
-               <h1 className="text-3xl font-black uppercase tracking-tight text-slate-900 flex items-center gap-3">
-                  <TrendingUp className="w-8 h-8 text-indigo-600" />
-                  Visualización de Directorio
-               </h1>
-               <p className="text-slate-500 font-bold mt-2 max-w-xl">Métricas de asistencia en tiempo real y registro dinámico de asistentes escaneados en el evento.</p>
-             </div>
-             <button onClick={handleExportCSV} className="flex items-center justify-center gap-2 px-6 py-3 bg-white border border-slate-200 hover:border-indigo-500 hover:bg-indigo-50 text-indigo-700 rounded-xl font-black uppercase tracking-widest transition-all shadow-sm">
-                <Download className="w-5 h-5" /> Exportar Reporte
-             </button>
-          </div>
+        if (!regError && regData) {
+          console.log(`Fetched ${regData.length} registrations`);
+          setRegistrations(new Set(regData.map(r => r.talk_id)));
+        }
+      }
 
-          {/* Quick Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-             <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex items-center gap-6">
-                <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-500 flex items-center justify-center shrink-0">
-                   <Users className="w-8 h-8" />
-                </div>
-                <div>
-                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Registrados</p>
-                   <p className="text-4xl font-black text-slate-800">{totalRegistered}</p>
-                </div>
-             </div>
-             <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex items-center gap-6">
-                <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-500 flex items-center justify-center shrink-0">
-                   <CheckCircle2 className="w-8 h-8" />
-                </div>
-                <div>
-                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Asistencia Actual</p>
-                   <p className="text-4xl font-black text-slate-800">{presentCount} <span className="text-lg opacity-50">/ {attendanceRate}%</span></p>
-                </div>
-             </div>
-             <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex items-center gap-6">
-                <div className="w-16 h-16 rounded-2xl bg-rose-50 text-rose-500 flex items-center justify-center shrink-0">
-                   <QrCode className="w-8 h-8" />
-                </div>
-                <div>
-                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Escaneos Totales</p>
-                   <p className="text-4xl font-black text-slate-800">{logs.length}</p>
-                </div>
-             </div>
-          </div>
+      // Fetch rooms
+      console.log('Fetching rooms...');
+      const { data: fetchRooms, error: roomsError } = await supabase
+        .from('rooms')
+        .select('*');
+        
+      if (roomsError) {
+        console.error('Supabase Rooms Error:', roomsError);
+        throw roomsError;
+      }
+      
+      if (Array.isArray(fetchRooms)) {
+        console.log(`Fetched ${fetchRooms.length} rooms from Supabase`);
+        setRooms(fetchRooms as Room[]);
+        localStorage.setItem('agenda-rooms-v3', JSON.stringify(fetchRooms));
+        setSupabaseLog(prev => ({ ...prev, rooms: fetchRooms.length }));
+      }
 
-          {/* Charts Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-             <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 lg:col-span-2">
-                <h3 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-6 flex items-center gap-2"><TrendingUp className="w-4 h-4"/> Flujo de Escaneos (Hora a hora)</h3>
-                <div className="h-[250px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={timelineData}>
-                      <defs>
-                        <linearGradient id="colorScans" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} />
-                      <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} />
-                      <Tooltip 
-                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                        itemStyle={{ fontWeight: 'bold' }}
-                      />
-                      <Area type="monotone" dataKey="Escaneos" stroke="#4f46e5" strokeWidth={3} fillOpacity={1} fill="url(#colorScans)" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-             </div>
-             
-             <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
-                <h3 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-6 flex items-center gap-2"><Presentation className="w-4 h-4"/> Tráfico por Salas</h3>
-                <div className="h-[250px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={roomAccessData} layout="vertical" margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
-                      <XAxis type="number" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} />
-                      <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 11, fontWeight: 'bold'}} />
-                      <Tooltip 
-                        cursor={{fill: '#f8fafc'}}
-                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                      />
-                      <Bar dataKey="Acceso" fill="#0ea5e9" radius={[0, 4, 4, 0]}>
-                         {roomAccessData.map((entry, index) => (
-                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                         ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-             </div>
-          </div>
+      // Fetch talks
+      console.log('Fetching talks...');
+      const { data: fetchTalks, error: talksError } = await supabase
+        .from('talks')
+        .select('*');
+        
+      if (talksError) {
+        console.error('Supabase Talks Error:', talksError);
+        throw talksError;
+      }
 
-          {/* Directory Viewer */}
-          <div className="bg-white rounded-3xl shadow-sm border border-slate-100 flex flex-col overflow-hidden">
-             <div className="p-6 md:p-8 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                   <h3 className="text-xl font-black uppercase tracking-tight text-slate-800">Personas y Registros</h3>
-                   <p className="text-sm font-bold text-slate-500 mt-1">Los asistentes recientemente escaneados aparecen primero.</p>
-                </div>
-                <div className="relative flex-1 max-w-sm">
-                   <Search className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                   <input 
-                     type="text" 
-                     placeholder="Buscar asistente..." 
-                     className="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-shadow"
-                     value={searchQuery}
-                     onChange={e => setSearchQuery(e.target.value)}
-                   />
-                </div>
-             </div>
+      if (Array.isArray(fetchTalks)) {
+        console.log(`Fetched ${fetchTalks.length} talks from Supabase`);
+        if (fetchTalks.length > 0) {
+          console.table(fetchTalks.slice(0, 5).map(t => ({ id: t.id, title: t.title.substring(0, 20) })));
+        }
+        const mappedTalks = fetchTalks.map((t: any) => ({
+          id: t.id,
+          title: t.title,
+          description: t.description || '',
+          startTime: t.start_time || t.startTime,
+          endTime: t.end_time || t.endTime,
+          roomId: t.room_id || t.roomId,
+          type: t.type || 'Keynote',
+          themeTag: t.theme_tag || t.themeTag,
+          speakers: t.speakers ? (typeof t.speakers === 'string' ? JSON.parse(t.speakers) : t.speakers) : [],
+          registeredCount: t.registered_count || t.registeredCount || 0,
+          capacity: t.capacity || 100,
+          organizers: t.organizers || [],
+          moderators: t.moderators || [],
+          summary: t.summary || '',
+          objective: t.objective || ''
+        })) as AgendaEvent[];
+        setEventsData(mappedTalks);
+        localStorage.setItem('agenda-events-v3', JSON.stringify(mappedTalks));
+        setSupabaseLog(prev => ({ ...prev, events: mappedTalks.length, status: 'Conectado ✓' }));
+      }
+      
+      setSyncStatus('success');
+      setLastSynced(new Date());
+      console.log('--- SUPABASE SYNC SUCCESS ---');
+    } catch (err: any) {
+      console.error('Supabase Sync Failed:', err);
+      setSyncStatus('error');
+      setSupabaseLog(prev => ({ ...prev, status: `Error: ${err.message || 'Desconocido'}` }));
+    }
+  };
 
-             <div className="p-6 md:p-8">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                   {sortedAttendees.length === 0 ? (
-                      <div className="col-span-full py-16 text-center text-slate-400">
-                         <QrCode className="w-16 h-16 mx-auto mb-4 opacity-20" />
-                         <p className="font-bold uppercase tracking-widest">No se encontraron registros</p>
-                      </div>
-                   ) : (
-                      sortedAttendees.map(attendee => {
-                         const scans = logs.filter(l => l.qrData === attendee.id);
-                         const isPresent = scans.length > 0;
-                         const latestScan = scans[0]; // descending since logs are prepended unhooked? wait, useQRControl prepends new logs => [newLog, ...prev] => index 0 is newest.
-                         
-                         return (
-                         <div key={attendee.id} className={classNames(
-                            "border rounded-2xl p-5 hover:shadow-lg transition-shadow group flex flex-col relative overflow-hidden",
-                            isPresent ? "bg-white border-indigo-100 hover:border-indigo-300" : "bg-slate-50/50 border-slate-200"
-                         )}>
-                            {/* Accent highlight for actively scanned today */}
-                            {isPresent && <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-400 to-indigo-500"></div>}
-                            
-                            <div className="flex justify-between items-start mb-4">
-                               <div className="flex items-center gap-3">
-                                  {attendee.photoUrl ? (
-                                    <img 
-                                      src={attendee.photoUrl} 
-                                      alt={attendee.name} 
-                                      className="w-12 h-12 rounded-full object-cover border-2 border-slate-100" 
-                                      referrerPolicy="no-referrer"
-                                    />
-                                  ) : (
-                                    <div className={classNames(
-                                       "w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg border-2",
-                                       isPresent ? "bg-indigo-50 text-indigo-600 border-indigo-100" : "bg-slate-100 text-slate-400 border-slate-50"
-                                    )}>
-                                       {attendee.name.charAt(0)}
-                                    </div>
-                                  )}
-                                  <div>
-                                     <h3 className="font-black text-slate-900 leading-tight">{attendee.name}</h3>
-                                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mt-1">{attendee.role}</p>
-                                  </div>
-                               </div>
-                            </div>
-                            
-                            <div className="space-y-2 text-xs font-medium text-slate-600 block">
-                               <div className="flex items-start gap-2">
-                                  <Building className="w-4 h-4 text-slate-400 shrink-0" />
-                                  <span>{attendee.organization}</span>
-                               </div>
-                               {attendee.email && (
-                                  <div className="flex items-center gap-2">
-                                     <Mail className="w-4 h-4 text-slate-400" />
-                                     <span className="truncate">{attendee.email}</span>
-                                  </div>
-                               )}
-                            </div>
+  const saveRoom = async (room: Room) => {
+    const prevRooms = [...rooms];
+    const isNew = !rooms.find(r => r.id === room.id) || room.id === 'new';
+    const finalRoom = { ...room };
+    if (isNew && room.id === 'new') {
+      finalRoom.id = room.name.toLowerCase().replace(/\s+/g, '-');
+    }
 
-                            <div className="mt-4 pt-4 border-t border-slate-100 flex items-end justify-between">
-                               <div>
-                                  {isPresent ? (
-                                     <div className="flex flex-col gap-1">
-                                        <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase text-emerald-600 bg-emerald-50 px-2 py-1 rounded w-fit">
-                                           <CheckCircle2 className="w-3 h-3" /> Asistió
-                                        </span>
-                                        <span className="text-[9px] text-slate-400 font-bold ml-1">Último: {new Date(latestScan.timestamp).toLocaleTimeString()}</span>
-                                     </div>
-                                  ) : (
-                                     <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase text-slate-400 bg-slate-100 px-2 py-1 rounded w-fit">
-                                        Ausente / No Escaneado
-                                     </span>
-                                  )}
-                               </div>
-                               <button 
-                                 onClick={() => setViewingQrFor(attendee)}
-                                 className="text-slate-400 hover:text-indigo-600 transition-colors p-2 rounded-full hover:bg-indigo-50"
-                               >
-                                  <QrCode className="w-5 h-5"/>
-                               </button>
-                            </div>
-                         </div>
-                      );
-                   })
-                 )}
-                </div>
-             </div>
-          </div>
+    // 1. Local Persistence First
+    const updatedRooms = isNew 
+      ? [...rooms, finalRoom] 
+      : rooms.map(r => r.id === finalRoom.id ? finalRoom : r);
+    
+    setRooms(updatedRooms);
+    localStorage.setItem('agenda-rooms-v3', JSON.stringify(updatedRooms));
+    
+    const toastId = toast.loading(isNew ? "Creando sala..." : "Actualizando sala...");
 
-          {/* QR Modal View */}
-          {viewingQrFor && (
-             <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setViewingQrFor(null)}>
-                <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl relative animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
-                   <button onClick={() => setViewingQrFor(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 p-2"><X className="w-5 h-5"/></button>
-                   <h3 className="font-black text-xl text-slate-900 uppercase tracking-tight mb-2">{viewingQrFor.name}</h3>
-                   <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-8">{viewingQrFor.organization}</p>
-                   
-                   <div className="bg-white p-4 inline-block rounded-2xl border-4 border-indigo-100 mx-auto shadow-sm">
-                      <QRCode value={viewingQrFor.id} size={200} level="H" />
-                   </div>
-                   
-                   <div className="mt-8 bg-slate-50 rounded-xl p-3 border border-slate-100">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">ID Único</p>
-                      <p className="font-mono text-xs font-bold text-slate-700">{viewingQrFor.id}</p>
-                   </div>
-                </div>
-             </div>
-          )}
+    try {
+      const supabase = getSupabase();
+      // TABLA 'rooms'
+      const { error } = isNew 
+        ? await supabase.from('rooms').insert([finalRoom])
+        : await supabase.from('rooms').update(finalRoom).eq('id', finalRoom.id);
+      
+      if (error) throw error;
+      
+      toast.success(isNew ? "Sala creada" : "Sala actualizada", { id: toastId });
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await syncData();
+    } catch (err: any) {
+      setRooms(prevRooms);
+      toast.error(`Error: ${err.message}`, { id: toastId });
+    }
+  };
 
-       </div>
-    </div>
-  );
+  const deleteRoom = async (id: string) => {
+    const prevRooms = [...rooms];
+    const updatedRooms = rooms.filter(r => r.id !== id);
+    setRooms(updatedRooms);
+    localStorage.setItem('agenda-rooms-v3', JSON.stringify(updatedRooms));
+
+    const toastId = toast.loading("Eliminando sala...");
+    try {
+      const supabase = getSupabase();
+      // TABLA 'rooms'
+      const { error } = await supabase.from('rooms').delete().eq('id', id);
+      if (error) throw error;
+      toast.success("Sala eliminada", { id: toastId });
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await syncData();
+    } catch (err: any) {
+      setRooms(prevRooms);
+      toast.error(`Error: ${err.message}`, { id: toastId });
+    }
+  };
+
+  const saveEvent = async (event: AgendaEvent) => {
+    const prevEvents = [...eventsData];
+    const isNew = !eventsData.find(e => e.id === event.id);
+    
+    // 1. Local Persistence First
+    const updatedEvents = isNew 
+      ? [...eventsData, event] 
+      : eventsData.map(e => e.id === event.id ? event : e);
+    
+    setEventsData(updatedEvents);
+    localStorage.setItem('agenda-events-v3', JSON.stringify(updatedEvents));
+    
+    const toastId = toast.loading(isNew ? "Creando charla..." : "Actualizando charla...");
+
+    try {
+      const supabase = getSupabase();
+      // Normalización de fechas para evitar desplazamientos por zona horaria
+      const normalizeDate = (dateStr: string) => {
+        if (!dateStr) return null;
+        // No añadimos 'Z' para que se trate como hora local (naive) o lo que el usuario ingresó
+        if (dateStr.length === 16) return `${dateStr}:00`; 
+        return dateStr;
+      };
+
+      const payload = {
+        id: event.id,
+        title: event.title,
+        description: event.description || '',
+        start_time: normalizeDate(event.startTime),
+        end_time: normalizeDate(event.endTime),
+        room_id: event.roomId,
+        type: event.type,
+        theme_tag: event.themeTag || '',
+        speakers: event.speakers || [],
+        registered_count: event.registeredCount || 0,
+        capacity: event.capacity || 100,
+        organizers: event.organizers || [],
+        moderators: event.moderators || [],
+        summary: event.summary || '',
+        objective: event.objective || ''
+      };
+
+      // TABLA 'talks'
+      const { error } = isNew 
+        ? await supabase.from('talks').insert([payload])
+        : await supabase.from('talks').update(payload).eq('id', event.id);
+      
+      if (error) throw error;
+      
+      toast.success(isNew ? "Charla creada" : "Charla actualizada", { id: toastId });
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await syncData();
+    } catch (err: any) {
+      setEventsData(prevEvents);
+      toast.error(`Error: ${err.message}`, { id: toastId });
+    }
+  };
+
+  const deleteEvent = async (id: string) => {
+    const prevEvents = [...eventsData];
+    
+    // 1. ACTUALIZACIÓN INMEDIATA (OPTIMISTA)
+    const updatedEvents = eventsData.filter(e => e.id !== id);
+    setEventsData(updatedEvents);
+    localStorage.setItem('agenda-events-v3', JSON.stringify(updatedEvents));
+    
+    const toastId = toast.loading("Eliminando de la nube...");
+    
+    try {
+      const supabase = getSupabase();
+      
+      // 2. Limpiar dependencias (registros)
+      await supabase.from('registration').delete().eq('talk_id', id);
+
+      // 3. Borrar en la DB principal (TABLA 'talks')
+      const { error } = await supabase.from('talks').delete().eq('id', id);
+      
+      if (error) throw error;
+      
+      toast.success("Eliminado permanentemente", { id: toastId });
+      
+      // 4. ESPERA CRÍTICA DE CONSISTENCIA (500ms)
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // 5. RESINCRONIZACIÓN DE VERIFICACIÓN
+      await syncData();
+      
+    } catch (err: any) {
+      console.error("Delete Error:", err);
+      // Rollback si falla
+      setEventsData(prevEvents);
+      localStorage.setItem('agenda-events-v3', JSON.stringify(prevEvents));
+      toast.error(`Error: ${err.message}`, { id: toastId });
+    }
+  };
+
+  // Fetch initial data from Supabase
+  useEffect(() => {
+    const init = async () => {
+      await syncData();
+      setLoadingInitial(false);
+    };
+    init();
+  }, [user]);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedType, setSelectedType] = useState<EventType | 'All'>('All');
+  const [selectedRoom, setSelectedRoom] = useState<string>('All');
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'All' | 'MyAgenda'>('All');
+
+  useEffect(() => {
+    if (!selectedDay && eventsData.length > 0) {
+      const days = Array.from(new Set(eventsData.map(e => e.startTime.split('T')[0]))).sort();
+      if (days.length > 0) setSelectedDay(days[0]);
+    }
+  }, [eventsData, selectedDay]);
+
+  const toggleBookmark = (eventId: string) => {
+    setBookmarks((prev) => {
+      const next = new Set(prev);
+      if (next.has(eventId)) next.delete(eventId);
+      else next.add(eventId);
+      return next;
+    });
+  };
+
+  const registerForEvent = async (eventId: string) => {
+    if (!user) return;
+    // Optimistic UI updates
+    setEventsData(prev => prev.map(e => e.id === eventId ? { ...e, registeredCount: (e.registeredCount || 0) + 1 } : e));
+    setRegistrations(prev => new Set(prev).add(eventId));
+    
+    try {
+      const supabase = getSupabase();
+      await supabase.from('registration').insert({ user_id: user.id, talk_id: eventId });
+    } catch (e) {
+      console.error('Failed to register', e);
+      // Revert optimistic
+      setRegistrations(prev => { const n = new Set(prev); n.delete(eventId); return n; });
+    }
+  };
+ 
+  const cancelRegistration = async (eventId: string) => {
+    if (!user) return;
+    setEventsData(prev => prev.map(e => e.id === eventId ? { ...e, registeredCount: Math.max(0, (e.registeredCount || 0) - 1) } : e));
+    setRegistrations(prev => { const n = new Set(prev); n.delete(eventId); return n; });
+
+    try {
+      const supabase = getSupabase();
+      await supabase.from('registration').delete().match({ user_id: user.id, talk_id: eventId });
+    } catch (e) {
+      console.error('Failed to cancel', e);
+    }
+  };
+
+  const availableDays = useMemo(() => {
+    return Array.from(new Set(eventsData.map(e => e.startTime.split('T')[0]))).sort();
+  }, [eventsData]);
+
+  const filteredEvents = useMemo(() => {
+    return eventsData.filter((event) => {
+      if (selectedDay && event.startTime.split('T')[0] !== selectedDay && viewMode !== 'MyAgenda') return false;
+      if (viewMode === 'MyAgenda' && !bookmarks.has(event.id) && !registrations.has(event.id)) return false;
+      if (selectedRoom !== 'All' && event.roomId !== selectedRoom) return false;
+      if (selectedType !== 'All' && event.type !== selectedType) return false;
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const matchesTitle = event.title.toLowerCase().includes(query);
+        const matchesSpeakers = event.speakers.some((s) => s.name.toLowerCase().includes(query));
+        if (!matchesTitle && !matchesSpeakers) return false;
+      }
+      return true;
+    }).sort((a, b) => {
+      const timeDiff = new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return a.title.localeCompare(b.title);
+    });
+  }, [searchQuery, selectedType, selectedRoom, selectedDay, viewMode, bookmarks, registrations, eventsData]);
+
+  const groupedEvents = useMemo(() => {
+    const groups: Record<string, Record<string, AgendaEvent[]>> = {};
+    filteredEvents.forEach(event => {
+      const dateKey = event.startTime.split('T')[0];
+      const timeKey = event.startTime;
+      if (!groups[dateKey]) groups[dateKey] = {};
+      if (!groups[dateKey]?.[timeKey]) groups[dateKey][timeKey] = [];
+      groups[dateKey][timeKey].push(event);
+    });
+    return groups;
+  }, [filteredEvents]);
+
+  return {
+    events: eventsData,
+    filteredEvents,
+    groupedEvents,
+    rooms,
+    setRooms,
+    setEventsData,
+    bookmarks,
+    toggleBookmark,
+    registrations,
+    registerForEvent,
+    cancelRegistration,
+    searchQuery,
+    setSearchQuery,
+    selectedType,
+    setSelectedType,
+    selectedRoom,
+    setSelectedRoom,
+    selectedDay,
+    setSelectedDay,
+    availableDays,
+    viewMode,
+    setViewMode,
+    syncData,
+    syncStatus,
+    lastSynced,
+    supabaseLog,
+    clearLocalCache,
+    deleteEvent,
+    saveEvent,
+    saveRoom,
+    deleteRoom,
+  };
 }
