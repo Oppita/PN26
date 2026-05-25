@@ -5,6 +5,7 @@ import QRCode from 'react-qr-code';
 import { useAgendaData } from './hooks/useAgendaData';
 import { FilterBar } from './components/FilterBar';
 import { AgendaCard } from './components/AgendaCard';
+import { FeedbackQR } from './components/FeedbackQR';
 import { RoomModal } from './components/RoomModal';
 import { EventModal } from './components/EventModal';
 import { AdminEventDetailsModal } from './components/AdminEventDetailsModal';
@@ -181,6 +182,10 @@ function MainApp() {
                     rooms={rooms}
                   />
                </div>
+               
+               <div className="relative z-10 mt-4 lg:mt-auto lg:pt-8 w-full border-t border-slate-100/50 pt-6">
+                 <FeedbackQR className="w-full" />
+               </div>
           </aside>
 
           <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 relative">
@@ -231,6 +236,11 @@ function MainApp() {
 
           <main className="flex-1 overflow-y-auto p-6 md:p-8">
              <div className="max-w-7xl mx-auto">
+                 {/* Mobile version of QR Code, visible at top */}
+                 <div className="lg:hidden mb-10 w-full">
+                    <FeedbackQR className="max-w-[15rem] mx-auto" />
+                 </div>
+
                  {viewMode === 'MyAgenda' && bookmarks.size === 0 ? (
                   <div className="h-64 flex flex-col items-center justify-center text-slate-400 bg-white rounded-3xl border-2 border-dashed border-slate-200 shadow-sm">
                     <Bookmark className="w-12 h-12 mb-4 opacity-20" />
@@ -283,14 +293,8 @@ function MainApp() {
                 )}
              </div>
 
-             {/* QR Code Section for feedback */}
-             <div className="max-w-[15rem] mx-auto mt-6 mb-8 flex flex-col items-center justify-center p-6 bg-white rounded-2xl border border-slate-200 shadow-sm text-center">
-                 <h3 className="font-black text-emerald-800 tracking-tight leading-tight mb-2 uppercase text-sm">Déjanos conocer tu opinión</h3>
-                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-4">Escanea el código QR</p>
-                 <div className="p-3 bg-white border-2 border-emerald-50 rounded-xl shadow-sm">
-                   <QRCode value="https://symmetrical-succotash-1.onrender.com/q/plataforma2026" size={120} fgColor="#064e3b" />
-                 </div>
-             </div>
+             {/* Bottom QR Code Section for feedback */}
+             <FeedbackQR className="max-w-[15rem] mx-auto mt-6 mb-8" />
           </main>
         </div>
       </div>
